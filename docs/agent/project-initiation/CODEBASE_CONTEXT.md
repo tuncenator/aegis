@@ -1,0 +1,372 @@
+# Codebase Context
+
+> **Living document** -- each phase updates this with new discoveries and changes.
+> Read this before exploring the codebase. It may already have what you need.
+>
+> Last updated by: Setup agent - Phase 0 (initial scaffold)
+
+---
+
+## Architecture Overview
+
+Aegis is a greenfield Claude Code plugin project. At Phase 0 (this document's creation), the working directory contains only `docs/`. The full architecture is described in `PROJECT_PLAN.md` and the design spec at `docs/superpowers/specs/2026-04-30-aegis-design.md`.
+
+**Build pattern**: a single PreToolUse hook (`orchestrator.sh`) that dispatches by tool name through layered decision pipelines. The deterministic layers (bash) are pure shell scripts. The slow path (LLM classifier) is a Python package invoked via `python3 -m classifier` only when no deterministic layer fires.
+
+**Source code dependencies on existing repos**:
+- `~/Sync/Programs/bash-gatekeeper/` -- vendored verbatim into `lib/` in Phase 1, plus `tests/` directory copied wholesale into `tests/bash/` in Phase 2.
+- `~/.claude/hooks/bash-denylist.sh` -- vendored verbatim into `lib/bash-denylist.sh` in Phase 1.
+
+**No other prior code exists in this project.** Everything else is created by the phase plans.
+
+---
+
+## Key Files & Modules
+
+> List important files that agents are likely to need. Include purpose and when you would read each file.
+
+### Existing at setup time (read for context)
+
+| File Path | Purpose | Notes |
+|-----------|---------|-------|
+| `docs/superpowers/specs/2026-04-30-aegis-design.md` | Full design spec (source of truth for v1 scope) | ~365 lines. Read once for architectural intent; the phase plans derive from this. |
+| `docs/superpowers/plans/2026-04-30-aegis.md` | Detailed 19-task TDD-style implementation plan | ~3000 lines. Each phase plan in `phase_plans/PHASE_XX.md` references the relevant tasks here. Read tasks for verbatim source listings and test fixtures. |
+| `docs/agent/project-initiation/PROJECT_PLAN.md` | Project overview, architecture, cross-cutting concerns | Read for big picture. |
+| `docs/agent/project-initiation/STATUS.md` | Phase tracker | Read first to identify current phase. |
+| `docs/agent/project-initiation/FUNCTIONAL_QA_STRATEGY.md` | Surface inventory, user loops, anti-patterns, harness | Read when phase plan has `Functional: yes`. |
+
+### To be created in Phase 1 (scaffold + vendor)
+
+| File Path | Purpose | Created in |
+|-----------|---------|------------|
+| `.gitignore` | Ignore `__pycache__`, `.pytest_cache`, `.aegis-cache`, etc. | Phase 1 |
+| `README.md` | Project README skeleton (full version in Phase 9) | Phase 1 |
+| `.claude-plugin/plugin.json` | Plugin manifest registering PreToolUse hook + slash commands | Phase 1 |
+| `pyproject.toml` | Python project config + pytest config (Phase 1 also adds loguru if logging-via-loguru is chosen) | Phase 1 |
+| `lib/bash-gatekeeper.sh` | Vendored verbatim from `~/Sync/Programs/bash-gatekeeper/bash-gatekeeper.sh` (~36KB, deterministic ALLOW layer) | Phase 1 (vendored, not authored) |
+| `lib/bash-denylist.sh` | Vendored verbatim from `~/.claude/hooks/bash-denylist.sh` (deterministic DENY, exit 2) | Phase 1 (vendored, not authored) |
+| `classifier/log.py` | Logging setup (likely loguru, possibly stdlib `logging`); Phase 1 picks the framework | Phase 1 |
+
+### To be created in Phase 2 (bash deterministic layers + tests)
+
+| File Path | Purpose | Created in |
+|-----------|---------|------------|
+| `lib/bash-hard-ask.sh` | Pure-bash ASK layer for force pushes, kubectl mutations, IaC apply, prod ssh, project-level patterns | Phase 2 |
+| `lib/protected-paths.sh` | Pure-bash ASK layer for Edit/Write/NotebookEdit on Anthropic protected paths + internals | Phase 2 |
+| `tests/bash/run.sh` | Corpus-driven harness (vendored from `~/Sync/Programs/bash-gatekeeper/tests/run.sh`, then adapted to dispatch to all four layers) | Phase 2 |
+| `tests/bash/corpus/should-allow.txt` | Vendored from bash-gatekeeper repo (~342 lines) | Phase 2 (vendored) |
+| `tests/bash/corpus/should-deny.txt` | Combined: vendored from bash-gatekeeper (~227 lines) plus the deny patterns from `docs/superpowers/plans/2026-04-30-aegis.md` Task 3 Step 3 (nuclear rm, curl-pipe-sh, AI attribution scrubs) | Phase 2 |
+| `tests/bash/corpus/should-ask.txt` | New: hard-ask patterns (force pushes, kubectl exec/delete/apply, IaC apply, cloud mass-deletes, prod ssh) | Phase 2 |
+| `tests/bash/corpus/protected-paths.txt` | New: file paths that protected-paths.sh must ASK for | Phase 2 |
+| `tests/bash/corpus/known-not-allowed.txt` | Vendored from bash-gatekeeper (~38 lines, NOTICE-bucket entries -- a known-not-allowed command that now allows is reported but does not fail the run) | Phase 2 |
+
+### To be created in Phase 3 (orchestrator + Python skeleton)
+
+| File Path | Purpose | Created in |
+|-----------|---------|------------|
+| `orchestrator.sh` | The single PreToolUse hook entry. Dispatches by `tool_name` through layered pipelines. | Phase 3 |
+| `tests/bash/orchestrator-cases.sh` | End-to-end orchestrator tests (read-only fast path, bash gatekeeper, hard-deny, hard-ask, protected-paths, novel-cmd). Uses `AEGIS_TEST_MOCK_DECISION` env to short-circuit the classifier subprocess. | Phase 3 |
+| `classifier/__init__.py` | Empty package marker | Phase 3 |
+| `classifier/__main__.py` | Placeholder entrypoint (full impl in Phase 7) -- reads stdin, returns `{decision: "ask"}` | Phase 3 |
+| `tests/python/conftest.py` | pytest config; ensures classifier package importable | Phase 3 |
+
+### To be created in Phase 4 (state + rules)
+
+| File Path | Purpose | Created in |
+|-----------|---------|------------|
+| `classifier/state.py` | Per-session state file r/w with deny counters + auto-pause | Phase 4 |
+| `classifier/rules.py` | Config + snapshot loader (built-in defaults < global TOML < project TOML) | Phase 4 |
+| `rules/snapshot.json` | Vendored output of `claude auto-mode defaults` (initial fetch) | Phase 4 |
+| `rules/snapshot.meta.json` | `{fetched_at, source, ttl_days}` for the snapshot | Phase 4 |
+| `tests/python/test_state.py` | State module tests | Phase 4 |
+| `tests/python/test_rules.py` | Rules module tests | Phase 4 |
+
+### To be created in Phase 5 (transcript + prompt + decision)
+
+| File Path | Purpose | Created in |
+|-----------|---------|------------|
+| `classifier/transcript.py` | Transcript JSONL parser (strips tool_results) | Phase 5 |
+| `classifier/prompt.py` | System prompt + user prompt builders | Phase 5 |
+| `classifier/decision.py` | Parse classifier model output; format Claude Code hook output | Phase 5 |
+| `tests/python/test_transcript.py` | Transcript parser tests | Phase 5 |
+| `tests/python/test_prompt.py` | Prompt builder tests | Phase 5 |
+| `tests/python/test_decision.py` | Decision parser/formatter tests | Phase 5 |
+| `tests/fixtures/transcript.minimal.jsonl` | Fixture transcript (4 entries, no tool_results) | Phase 5 |
+| `tests/fixtures/transcript.with_results.jsonl` | Fixture transcript including tool_result blocks (must be stripped) | Phase 5 |
+
+### To be created in Phase 6 (providers)
+
+| File Path | Purpose | Created in |
+|-----------|---------|------------|
+| `classifier/providers/__init__.py` | Package marker | Phase 6 |
+| `classifier/providers/base.py` | Shared retry/timeout machinery (`run_with_retry(spec, invoke)`) | Phase 6 |
+| `classifier/providers/gemini.py` | `gemini -m MODEL -p PROMPT` subprocess provider | Phase 6 |
+| `classifier/providers/claude.py` | `claude --model MODEL -p PROMPT` subprocess provider; sets `CCSWAP_NORENAME=1` | Phase 6 |
+| `tests/python/test_providers.py` | Provider tests with `monkeypatch.setattr(subprocess, "run", ...)` | Phase 6 |
+
+### To be created in Phase 7 (main + diag)
+
+| File Path | Purpose | Created in |
+|-----------|---------|------------|
+| `classifier/__main__.py` | Replace placeholder. Full chain orchestration: state -> rules -> transcript -> prompt -> provider chain -> decision -> diag. | Phase 7 |
+| `classifier/diag.py` | JSONL append writer for decision log | Phase 7 |
+| `orchestrator.sh` (modify) | Add `diag_emit` shell helper; call from each deterministic layer's exit path | Phase 7 |
+| `tests/python/test_main.py` | Chain orchestration tests (provider succeeds, falls to next, on_exhaustion, disabled session) | Phase 7 |
+| `tests/python/test_diag.py` | Diag writer tests | Phase 7 |
+
+### To be created in Phase 8 (CLI + slash commands)
+
+| File Path | Purpose | Created in |
+|-----------|---------|------------|
+| `bin/aegis` | Python CLI: `aegis status`, `aegis on`, `aegis off`, `aegis refresh-rules` | Phase 8 |
+| `commands/aegis-on.md` | Slash command wrapper (calls `bin/aegis on --session "$CLAUDE_SESSION_ID"`) | Phase 8 |
+| `commands/aegis-off.md` | Slash command wrapper | Phase 8 |
+| `commands/aegis-status.md` | Slash command wrapper | Phase 8 |
+| `tests/python/test_cli.py` | CLI subcommand tests | Phase 8 |
+
+### To be created in Phase 9 (install + readme)
+
+| File Path | Purpose | Created in |
+|-----------|---------|------------|
+| `install.sh` | Idempotent installer: link plugin, fetch snapshot if missing, link CLI, write starter config | Phase 9 |
+| `README.md` (rewrite) | Full README replacing Phase 1 skeleton | Phase 9 |
+
+---
+
+## Important APIs & Interfaces
+
+### Layer scripts: stdin -> stdout/exit-code contract
+
+Every layer script under `lib/` reads PreToolUse JSON on stdin and conforms to:
+
+| Layer script | Input expectation | Output (stdout) | Exit code |
+|--------------|-------------------|-----------------|-----------|
+| `lib/bash-denylist.sh` | `{tool_name, tool_input.command, ...}` | empty | 0 normal, **2** if matched (hard block) |
+| `lib/bash-hard-ask.sh` | `{tool_name="Bash", tool_input.command, cwd?}` | `{hookSpecificOutput:{...,permissionDecision:"ask",permissionDecisionReason:"<r>"}}` if matched, else empty | 0 |
+| `lib/bash-gatekeeper.sh` | `{tool_input.command}` | `{hookSpecificOutput:{...,permissionDecision:"allow"}}` if matched, else empty | 0 |
+| `lib/protected-paths.sh` | `{tool_name="Edit\|Write\|NotebookEdit", tool_input.file_path}` | `{hookSpecificOutput:{...,permissionDecision:"ask",permissionDecisionReason:"<r>"}}` if matched, else empty | 0 |
+
+Silent fall-through (empty stdout + exit 0) means "this layer doesn't apply; let the next layer try".
+
+### `orchestrator.sh` -> Claude Code permission decision JSON
+
+Reads the same PreToolUse JSON; emits one of:
+- `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}` (ALLOW)
+- `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"..."}}` (DENY -- via classifier; bash-denylist uses exit 2 instead)
+- `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask"}}` (ASK)
+- empty stdout + exit 0 (fall-through; Claude Code prompts user normally)
+- empty stdout + exit 2 (hard-deny via bash-denylist)
+
+### `classifier/__main__.py` -> Claude Code permission decision JSON
+
+Same output contract as orchestrator. Reads PreToolUse JSON on stdin via `python3 -m classifier`. The placeholder version (Phase 3) returns `{decision: "ask"}`. The full version (Phase 7) walks `cfg.classifier_chain`, retries per `ProviderSpec`, parses model output, applies state-aware deny counters.
+
+### `classifier.state` (Python module API)
+
+| Symbol | Signature / shape | Purpose |
+|--------|-------------------|---------|
+| `STATE_DIR` | `Path = Path.home() / ".cache" / "aegis" / "sessions"` | Base directory; tests monkeypatch this. |
+| `SessionState` | dataclass `{session_id: str, enabled: bool, consecutive_denies: int, total_denies: int, paused_reason: str\|None, last_decision_at: str\|None}` | Value type for per-session state. |
+| `load(session_id) -> SessionState` | -- | Read state from disk; return defaults if missing or corrupt. |
+| `save(s: SessionState) -> None` | -- | Atomic write (tmp + rename) with last_decision_at touched. |
+| `record_decision(s, decision, consecutive_limit=3, total_limit=20) -> None` | -- | Update counters; flip enabled=False on threshold. |
+
+### `classifier.rules` (Python module API)
+
+| Symbol | Purpose |
+|--------|---------|
+| `Snapshot` | dataclass `{allow: list[str], soft_deny: list[str], environment: list}`. Loaded from `rules/snapshot.json`. |
+| `ProviderSpec` | dataclass `{provider: str, model: str, retries: int, timeout_s: int}`. |
+| `Config` | dataclass holding the merged config (classifier_chain, on_exhaustion, deny limits, snapshot_ttl_days, context fields, trusted_orgs/domains/buckets/services, diag_path, log_level). |
+| `load_config(project_dir: str\|None) -> Config` | Built-in defaults < global TOML < project TOML. Project dir is `<cwd>/.aegis/aegis.toml`. |
+| `load_snapshot() -> Snapshot` | Read `rules/snapshot.json`. |
+| `snapshot_age_days() -> float` | For TTL refresh decisions. |
+
+### `classifier.transcript` (Python module API)
+
+| Symbol | Purpose |
+|--------|---------|
+| `ToolUse` | dataclass `{name: str, input: dict}`. |
+| `ParsedTranscript` | dataclass `{user_messages: list[str], tool_uses: list[ToolUse]}`. |
+| `parse(transcript_path: str, last_user_n: int) -> ParsedTranscript` | Reads JSONL; extracts user text and assistant tool_use blocks; strips tool_result entries. |
+
+### `classifier.prompt` (Python module API)
+
+| Symbol | Purpose |
+|--------|---------|
+| `build_system_prompt(snap: Snapshot, cfg: Config) -> str` | Static within session. Embeds allow/deny rules + trusted environment. |
+| `build_user_prompt(parsed: ParsedTranscript, pending: dict, claude_md: str\|None, cfg: Config) -> str` | Per-call. Includes user messages, prior tool_uses, optional CLAUDE.md (capped), and the pending action. |
+
+### `classifier.decision` (Python module API)
+
+| Symbol | Purpose |
+|--------|---------|
+| `Decision` | dataclass `{decision: str, reason: str}`. |
+| `DecisionError` | Exception for invalid/malformed responses. |
+| `parse_response(text: str) -> Decision` | Strips code fences and prose; validates `decision in {allow, deny, ask}`. |
+| `to_hook_output(d: Decision) -> str` | JSON string for Claude Code permission decision (with `permissionDecisionReason` only for deny). |
+
+### `classifier.providers` (Python module API)
+
+| Symbol | Purpose |
+|--------|---------|
+| `base.run_with_retry(spec, invoke)` | Calls `invoke()` up to `spec.retries` times; returns stdout on success, None on exhaustion. |
+| `gemini.call(spec, system, user) -> str\|None` | `subprocess.run(["gemini", "-m", spec.model, "-p", system + "\\n\\n---\\n\\n" + user], ...)`. |
+| `claude.call(spec, system, user) -> str\|None` | Same shape but `["claude", "--model", spec.model, "-p", ...]`. Sets `env["CCSWAP_NORENAME"]="1"`. |
+
+### `classifier.diag` (Python module API)
+
+| Symbol | Purpose |
+|--------|---------|
+| `emit(path, *, session_id, tool, layer, decision, reason, model, latency_ms, tokens=None)` | Append one JSONL row to `path`; auto-creates parent dir. |
+
+### `bin/aegis` (CLI)
+
+| Subcommand | Purpose |
+|------------|---------|
+| `aegis status [--session ID]` | Print current session state. |
+| `aegis on [--session ID]` | Set `enabled=True`, reset `consecutive_denies`, clear `paused_reason`. |
+| `aegis off [--session ID]` | Set `enabled=False`, set `paused_reason="manual"`. |
+| `aegis refresh-rules` | Run `claude auto-mode defaults`; vendor output to `rules/snapshot.json` + `rules/snapshot.meta.json`. |
+
+`AEGIS_STATE_DIR` env var redirects state directory (used by tests).
+
+---
+
+## Patterns & Conventions
+
+### Bash discipline
+
+- Every script begins with `#!/usr/bin/env bash` and `set -u`. `set -e` is **avoided** in pipeline scripts because we rely on no-match returns (silent fall-through with exit 0).
+- All JSON parsing through `jq -r`. Never grep/sed JSON.
+- Decision JSON emitted via parameter substitution on a string template (`ASK='{"hookSpecificOutput":...,"permissionDecisionReason":"%REASON%"}'; echo "${ASK/\%REASON\%/$reason}"`). Avoids quoting bugs across shells.
+- Stderr is for diagnostics only. Stdout is reserved for the Claude Code permission decision JSON. Never `echo` to stdout in a layer script unless emitting the final decision.
+- Long regex go on single lines without backslash continuation; readability is sacrificed for portability across awk/grep/sed implementations.
+
+### Python discipline
+
+- Stdlib only (with one allowed exception for `loguru`; Phase 1 picks).
+- Dataclasses for value types, with `from __future__ import annotations` for clean type hints.
+- Module docstrings explain purpose; avoid function docstrings unless intent isn't obvious from signature + types.
+- Atomic file writes via `.tmp` + `os.replace`. (See `state.py::save`.)
+- All file paths are `pathlib.Path`; never raw strings.
+- All subprocess calls go through `classifier.providers.base.run_with_retry` -- never `subprocess.run` directly in `__main__`.
+
+### TDD cadence (per the existing 19-task plan)
+
+Each task in `docs/superpowers/plans/2026-04-30-aegis.md` follows: write failing test, watch fail, implement, watch pass, commit. Phase plans inherit this cadence. Skipping the failing-test step is the most common defect this project guards against.
+
+### End-to-end flow example: routine `git status`
+
+1. Claude Code emits PreToolUse JSON: `{"tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"...","session_id":"..."}`.
+2. `orchestrator.sh` reads stdin, parses tool_name with jq.
+3. Tool is `Bash` -- pipeline starts.
+4. `lib/bash-denylist.sh` sees no destructive pattern; exits 0 with empty stdout.
+5. `lib/bash-hard-ask.sh` sees no force-push / kubectl / IaC pattern; exits 0 silent.
+6. `lib/bash-gatekeeper.sh` sees `git status` -- matched in its safe-cmd list; emits `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}`.
+7. orchestrator captures non-empty stdout, prints it, exits 0.
+8. Diag writer appends a JSONL row: `{"layer":"hard-allow","decision":"allow","model":null,...}`.
+9. Total elapsed: < 50ms. Zero Python startup. Zero LLM tokens.
+
+### End-to-end flow example: novel command `foobar quux`
+
+1. Claude Code emits PreToolUse JSON.
+2. orchestrator pipes through bash-denylist (silent), bash-hard-ask (silent), bash-gatekeeper (silent).
+3. orchestrator falls through to classifier: `echo "$INPUT" | exec env PYTHONPATH="$DIR" python3 -m classifier`.
+4. `classifier/__main__` reads stdin, loads state (enabled=true), config, snapshot.
+5. Parses transcript at `transcript_path` (last 10 user msgs + assistant tool_uses).
+6. Builds system prompt + user prompt.
+7. First provider in chain (`gemini -m gemini-3.1-flash-lite-preview`): subprocess call with timeout 8s, retries 2.
+8. Provider returns `{"decision":"ask","reason":"unfamiliar command"}`.
+9. `decision.parse_response` validates -> `Decision(decision="ask", reason="...")`.
+10. `state.record_decision` increments nothing for ask; saves state.
+11. `diag.emit` writes JSONL row with `layer="classifier"`, `model="gemini-3.1-flash-lite-preview"`, `latency_ms=...`.
+12. `decision.to_hook_output` emits Claude Code permission JSON; orchestrator passes through.
+
+---
+
+## Data Models
+
+The full schema list lives in `PROJECT_PLAN.md` under Data Schemas. The data models documented there (PreToolUse JSON input, Claude Code permission output, classifier model output, session state, decision log row, snapshot file) are the authoritative reference -- they are also reproduced verbatim in the design spec at `docs/superpowers/specs/2026-04-30-aegis-design.md`.
+
+The Python dataclasses corresponding to these schemas (`SessionState`, `Snapshot`, `ProviderSpec`, `Config`, `ParsedTranscript`, `ToolUse`, `Decision`) are listed in the APIs section above.
+
+---
+
+## Dependencies & Integration Points
+
+### Plugin discovery
+
+Claude Code discovers and loads the plugin automatically when the directory `~/.claude/plugins/aegis/` (or `~/Sync/.claude/plugins/aegis/` for the user's synced setup) contains a valid `.claude-plugin/plugin.json`. The user's `settings.json` is never modified by `install.sh`.
+
+### PreToolUse trigger
+
+The plugin manifest registers a single PreToolUse hook with `matcher: "*"`, pointing at `${CLAUDE_PLUGIN_ROOT}/orchestrator.sh`. Every tool call fires this hook.
+
+### Subagent inheritance
+
+Each subagent's tool calls fire PreToolUse the same way the parent's do. No special handling -- subagents inherit the pipeline transparently.
+
+### Multi-hook composition
+
+If the user has another PreToolUse hook in `settings.json`, Claude Code runs both and applies "most restrictive wins". Aegis is intentionally a single orchestrator (not multiple parallel hooks) so the gatekeeper-then-classifier chain isn't broken by parallel evaluation.
+
+---
+
+## Environment & Configuration
+
+### Build / test commands
+
+- Bash tests: `tests/bash/run.sh`
+- Orchestrator tests (mocked classifier): `AEGIS_TEST_MOCK_DECISION=ask tests/bash/orchestrator-cases.sh`
+- Orchestrator tests (real classifier path): `unset AEGIS_TEST_MOCK_DECISION && tests/bash/orchestrator-cases.sh` (only valid after Phase 7)
+- Python tests: `uv run python -m pytest tests/python/ -v`
+- Full suite (verification command): `tests/bash/run.sh && AEGIS_TEST_MOCK_DECISION=ask tests/bash/orchestrator-cases.sh && uv run python -m pytest tests/python/ -v`
+
+### Environment requirements
+
+- Python 3.11+ (for `tomllib`)
+- `uv` for dependency management
+- `jq` for bash hook JSON parsing
+- `gemini` CLI installed and authenticated (used for default classifier path)
+- `claude` CLI installed and authenticated (used for fallback classifier path AND for `claude auto-mode defaults` snapshot fetch)
+
+### Environment variables
+
+- `AEGIS_STATE_DIR` (test-only): redirects `classifier.state.STATE_DIR` for hermetic tests and CLI runs
+- `AEGIS_TEST_MOCK_DECISION` (test-only, set in `tests/bash/orchestrator-cases.sh` and friends): when set to `allow|deny|ask`, `orchestrator.sh` short-circuits the classifier subprocess and emits the corresponding decision. Used during Phase 3-6 when the real classifier doesn't yet produce decisions.
+- `AEGIS_TEST_LIVE` (Phase 9 only): opt-in flag for live classifier smoke. Excluded from default CI.
+- `CCSWAP_NORENAME=1` (set by `classifier.providers.claude` when invoking `claude` CLI): prevents recursive autorename interactions if the user's wrapper does that.
+
+### Local state
+
+- `~/.cache/aegis/sessions/<session_id>.json` -- per-session state files
+- `~/.cache/aegis/decisions.jsonl` -- decision log (append-only)
+- `~/.config/aegis/aegis.toml` -- global config (created by `install.sh`)
+- `<repo>/.aegis/aegis.toml` -- project-level config override (optional, deep-merged over global)
+- `<repo>/.aegis/hard-ask.toml` -- project-level additional hard-ask regex patterns (optional)
+
+---
+
+## External Services & APIs
+
+### `gemini` CLI
+
+Default classifier provider. Invoked as `gemini -m <model> -p <prompt>` via `subprocess.run` from `classifier/providers/gemini.py`. Stdout returns the model's text response (the classifier expects a single JSON object on the first line, possibly wrapped in code fences -- `decision.parse_response` handles fence stripping).
+
+Default model: `gemini-3.1-flash-lite-preview`. Fallback: `gemini-3-flash-preview`. (User-configured chain in `~/.config/aegis/aegis.toml`.)
+
+Authentication is the user's existing `gemini` CLI auth -- no project-level secrets.
+
+### `claude` CLI
+
+Fallback classifier provider AND snapshot refresh source. Invoked as `claude --model <model> -p <prompt>` from `classifier/providers/claude.py`, with `CCSWAP_NORENAME=1` set in env to avoid recursive autorename interactions.
+
+Also invoked as `claude auto-mode defaults` from `bin/aegis refresh-rules` to fetch the rule snapshot. The output is captured verbatim as `rules/snapshot.json`.
+
+Default fallback model: `claude-haiku-4-5`. Authentication is the user's existing `claude` CLI auth.
+
+### Anthropic auto-mode docs
+
+Reference only -- the implementation does not call any Anthropic HTTP API directly. The published rules come through `claude auto-mode defaults` (a CLI subcommand), not through a REST endpoint.
+
