@@ -3,7 +3,7 @@
 > **Living document** -- each phase updates this with new discoveries and changes.
 > Read this before exploring the codebase. It may already have what you need.
 >
-> Last updated by: Checkpoint 3 - consolidated Phase 3 updates
+> Last updated by: Checkpoint 4 - consolidated Phase 4 updates
 
 ---
 
@@ -71,16 +71,16 @@ Aegis is a greenfield Claude Code plugin project. At Phase 0 (this document's cr
 | `classifier/__main__.py` | Placeholder entrypoint (Phase 7 replaces entirely). Reads stdin, writes `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask"}}` to stdout, exit 0. | Uses `json.dump` (spaces after colons). No logging, no error handling, intentionally minimal. |
 | `tests/python/conftest.py` | pytest sys.path config: inserts repo root so `from classifier import ...` works. | `REPO_ROOT = Path(__file__).resolve().parent.parent.parent` |
 
-### To be created in Phase 4 (state + rules)
+### Created in Phase 4 (state + rules)
 
-| File Path | Purpose | Created in |
-|-----------|---------|------------|
-| `classifier/state.py` | Per-session state file r/w with deny counters + auto-pause | Phase 4 |
-| `classifier/rules.py` | Config + snapshot loader (built-in defaults < global TOML < project TOML) | Phase 4 |
-| `rules/snapshot.json` | Vendored output of `claude auto-mode defaults` (initial fetch) | Phase 4 |
-| `rules/snapshot.meta.json` | `{fetched_at, source, ttl_days}` for the snapshot | Phase 4 |
-| `tests/python/test_state.py` | State module tests | Phase 4 |
-| `tests/python/test_rules.py` | Rules module tests | Phase 4 |
+| File Path | Purpose | Notes |
+|-----------|---------|-------|
+| `classifier/state.py` | Per-session state file r/w with deny counters + auto-pause | `SessionState` dataclass + `load`, `save`, `record_decision`. `STATE_DIR` module constant (tests monkeypatch). Atomic write via `.tmp` + `os.replace`. |
+| `classifier/rules.py` | Config + snapshot loader (built-in defaults < global TOML < project TOML) | `Snapshot`, `ProviderSpec`, `Config` dataclasses + `load_config`, `load_snapshot`, `snapshot_age_days`. `_DEFAULT_CHAIN` has 3 providers. |
+| `rules/snapshot.json` | Vendored output of `claude auto-mode defaults` (real data, fetched 2026-04-30) | 8 allow, 32 soft_deny, 5 environment entries. Keys: `allow`, `soft_deny`, `environment`. |
+| `rules/snapshot.meta.json` | Snapshot metadata | `{fetched_at: "2026-04-30T00:46:44Z", source: "claude auto-mode defaults", ttl_days: 14}` |
+| `tests/python/test_state.py` | 7 state module tests | Hermetic via `tmp_path` + monkeypatch on `STATE_DIR`. |
+| `tests/python/test_rules.py` | 5 rules module tests | Hermetic via `tmp_path` + monkeypatch on `SNAPSHOT_PATH`, `GLOBAL_CFG`, etc. |
 
 ### To be created in Phase 5 (transcript + prompt + decision)
 
