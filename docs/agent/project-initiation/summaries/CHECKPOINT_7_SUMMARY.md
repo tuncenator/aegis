@@ -80,7 +80,35 @@ No helpers listed for Phase 8. No helper issues reported in the phase summary.
 
 ## Code Review Results
 
-Pending.
+**Result**: REVIEW PASSED WITH NOTES (3 minor issues, none blocking)
+
+| Severity | Issue | Location | Notes |
+|----------|-------|----------|-------|
+| Minor | Redundant `monkeypatch` parameter in 2 tests | tests/python/test_cli.py | `test_status_no_session_returns_message` and `test_off_then_on_round_trip` accept `monkeypatch` directly even though the `isolated_state` fixture already uses it. The extra parameter is unused in the test body. Harmless but slightly noisy. |
+| Minor | `__import__("os").environ` inline pattern | tests/python/test_cli.py lines 29, 36, 50 | Avoids adding `os` to top-level imports but `__import__` inline is unusual. Cosmetic only. |
+| Minor | Semicolons on argparse subparser lines | bin/aegis | `sp.add_argument("--session"); sp.set_defaults(func=cmd_status)` -- valid Python, compact, but unconventional. Style nit. |
+
+### Reviewer Notes
+
+- **Shebang and executable bit**: `#!/usr/bin/env python3` on line 1, mode `-rwxr-xr-x`. Correct.
+- **Module-level env override timing verified**: lines 19-20 of `bin/aegis` execute at module load time, BEFORE any function calls. The redirect applies once per CLI invocation. Tests rely on this.
+- **`sys.path.insert`**: `REPO_ROOT = Path(__file__).resolve().parent.parent` correctly resolves to repo root.
+- **`_most_recent_session()`**: returns `files[0].stem` (strips `.json`). Correct.
+- **`cmd_off` fallback to `"manual"`**: line 63 chains `args.session or _most_recent_session() or "manual"`. Correct.
+- **`cmd_refresh_rules` 3 error paths verified**: `(FileNotFoundError, subprocess.TimeoutExpired)` tuple-catch, returncode != 0 check. All three print to stderr and return 1.
+- **No snapshot files modified in diff**: phase summary's QA smoke restored them via `git checkout` after testing.
+- **Slash command markdown shape correct**: all three files have YAML frontmatter (`description:`), body, `!`-prefixed shell line ending with backtick. Subcommands match (on/off/status).
+- **Plugin manifest unmodified**: `git log --oneline 8a606619..b80ce3fc -- .claude-plugin/plugin.json` empty. Manifest references match Phase 8's file names exactly.
+- **Phase 1-7 files unmodified**: full path-list git log returned empty. No cross-contamination.
+- **Stdlib only**: `argparse, json, os, subprocess, sys, datetime.{datetime, timezone}, pathlib.Path` plus intra-package `classifier.state`. No external deps.
+- **`subprocess.run` uses list form** (no shell=True). No injection vulnerabilities.
+- **Integration verified**: `state.py::_path` reads STATE_DIR at call time (not captured at import), so `bin/aegis`'s module-level override propagates correctly.
+- **Test-first compliance**: implementation + tests co-committed in `b1f9040`. Tests invoke real CLI as subprocess (NOT module import). No real `claude` invocation in tests.
+- **AP2/AP3/AP9 mitigations confirmed**: shim for claude in QA smoke, AEGIS_STATE_DIR isolation in all tests, no install of in-development hook.
+- **6/6 Functional QA checks** with byte-for-byte evidence. No illegitimate deferrals.
+- **No hardcoded secrets, no helper script edits, no high-entropy strings.**
+
+Reviewer agent: spark-code-reviewer.
 
 ---
 
