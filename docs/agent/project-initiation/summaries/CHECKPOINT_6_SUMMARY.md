@@ -70,7 +70,32 @@ No helpers listed for this phase. No helper issues reported in the phase summary
 
 ## Code Review Results
 
-Pending.
+**Result**: REVIEW PASSED WITH NOTES (2 minor issues, none blocking)
+
+| Severity | Issue | Location | Notes |
+|----------|-------|----------|-------|
+| Minor | Unused import `patch` in test_main.py | tests/python/test_main.py line 9 | `from unittest.mock import patch` -- never used. All mocking uses pytest's `monkeypatch`. Style nit. |
+| Minor | Known harness drift on unmocked orchestrator-cases.sh | tests/bash/orchestrator-cases.sh "novel cmd" case | Real classifier returns "deny" not "ask" for novel commands. Phase 3 harness assertion is too narrow. Mocked variant (10/10) is the regression gate. Future-cycle harness fix; out of scope for Phase 7. |
+
+### Reviewer Notes
+
+- **Chain walk semantics correct**: loop continues on (a) `_call_provider` returns None, (b) repair returns None, (c) repair parse fails. Repair is single-shot, same-provider; subsequent providers get original `usr_p`.
+- **State coupling on chain exhaustion correct**: synthetic Decision -> record_decision -> save -> diag.emit -> stdout. Order matches spec (record-then-save-then-emit).
+- **Disabled-session early-exit verified**: state.load runs first, then `if not sess.enabled: return 0`. No transcript parse, no provider calls, no diag emit. Test asserts `stdout == ""` AND `mock_diag == []`.
+- **Malformed stdin**: `json.JSONDecodeError` -> `return 0` immediately. No state mutation, no diag emit.
+- **Empty stdin**: `if raw.strip() else {}` proceeds with empty payload defaults.
+- **`_read_claude_md`**: catches OSError, returns None. Empty cwd or missing CLAUDE.md returns None safely.
+- **Latency measurement**: `t0 = time.time()` at function top covers the full critical path.
+- **Schema match Python vs bash diag_emit verified**: identical 9 fields, identical order, identical JSONL format. Both use ISO8601 UTC for `ts`.
+- **orchestrator.sh modifications correct**: SESS extraction at line 41 with `// "unknown"` fallback. diag_emit helper at lines 44-60. 5 call sites at lines 65, 76, 83, 90, 105 with correct argument order. No call on classifier branches (lines 95-97, 108-110, 115-116). `exec` only at line 116 (catch-all tail).
+- **Phase 1-6 files unmodified** (except orchestrator.sh which IS the one allowed cross-phase modification).
+- **Stdlib only**: __main__.py imports `json, sys, time, pathlib, typing` + intra-package; diag.py imports `json, os, datetime, pathlib`. No external deps.
+- **TDD compliance**: RED state captured (ImportError on classifier.diag, AttributeError on `_call_provider`) before GREEN. Tests co-committed with implementation.
+- **Test quality**: AP1 (exercises `main()` through stdin/stdout, not internal helpers), AP2 (no real subprocess), AP3 (autouse fixtures for state.STATE_DIR + mock_diag), AP10 (exec only at orchestrator tail) all confirmed.
+- **Functional QA**: 7/7 covered, 1 legitimately deferred to Phase 9. All evidence pasted byte-for-byte.
+- **No hardcoded secrets, no injection vulnerabilities, no helper script edits, no high-entropy strings.**
+
+Reviewer agent: spark-code-reviewer.
 
 ---
 
