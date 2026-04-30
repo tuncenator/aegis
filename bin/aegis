@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""Aegis CLI: control session state and refresh rule snapshot."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+
+from classifier import state as st  # noqa: E402
+
+# Allow tests to redirect state directory.
+if "AEGIS_STATE_DIR" in os.environ:
+    st.STATE_DIR = Path(os.environ["AEGIS_STATE_DIR"])
+
+
+def _most_recent_session() -> str | None:
+    if not st.STATE_DIR.exists():
+        return None
+    files = list(st.STATE_DIR.glob("*.json"))
+    if not files:
+        return None
+    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return files[0].stem
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    sid = args.session or _most_recent_session()
+    if not sid:
+        print("no active session")
+        return 0
+    s = st.load(sid)
+    print(f"Session {s.session_id}")
+    print(f"  enabled: {s.enabled}")
+    print(f"  consecutive_denies: {s.consecutive_denies}")
+    print(f"  total_denies: {s.total_denies}")
+    print(f"  paused_reason: {s.paused_reason}")
+    print(f"  last_decision_at: {s.last_decision_at}")
+    return 0
+
+
+def cmd_on(args: argparse.Namespace) -> int:
+    sid = args.session or _most_recent_session()
+    if not sid:
+        print("no session to enable", file=sys.stderr)
+        return 1
+    s = st.load(sid)
+    s.enabled = True
+    s.consecutive_denies = 0
+    s.paused_reason = None
+    st.save(s)
+    print(f"Aegis enabled for session {sid}")
+    return 0
+
+
+def cmd_off(args: argparse.Namespace) -> int:
+    sid = args.session or _most_recent_session() or "manual"
+    s = st.load(sid)
+    s.enabled = False
+    s.paused_reason = "manual"
+    st.save(s)
+    print(f"Aegis disabled for session {sid}")
+    return 0
+
+
+def cmd_refresh_rules(args: argparse.Namespace) -> int:
+    snap_path = REPO_ROOT / "rules" / "snapshot.json"
+    meta_path = REPO_ROOT / "rules" / "snapshot.meta.json"
+    snap_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        r = subprocess.run(["claude", "auto-mode", "defaults"],
+                           capture_output=True, text=True, timeout=30)
+    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+        print(f"refresh failed: {e}", file=sys.stderr)
+        return 1
+    if r.returncode != 0:
+        print(f"claude returned {r.returncode}: {r.stderr}", file=sys.stderr)
+        return 1
+    snap_path.write_text(r.stdout)
+    meta_path.write_text(json.dumps({
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "source": "claude auto-mode defaults",
+        "ttl_days": 14,
+    }, indent=2))
+    print(f"snapshot refreshed: {snap_path}")
+    return 0
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(prog="aegis")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    sp = sub.add_parser("status")
+    sp.add_argument("--session"); sp.set_defaults(func=cmd_status)
+
+    sp = sub.add_parser("on")
+    sp.add_argument("--session"); sp.set_defaults(func=cmd_on)
+
+    sp = sub.add_parser("off")
+    sp.add_argument("--session"); sp.set_defaults(func=cmd_off)
+
+    sp = sub.add_parser("refresh-rules")
+    sp.set_defaults(func=cmd_refresh_rules)
+
+    args = p.parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
