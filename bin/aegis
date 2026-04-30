@@ -97,13 +97,16 @@ def main() -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sp = sub.add_parser("status")
-    sp.add_argument("--session"); sp.set_defaults(func=cmd_status)
+    sp.add_argument("--session")
+    sp.set_defaults(func=cmd_status)
 
     sp = sub.add_parser("on")
-    sp.add_argument("--session"); sp.set_defaults(func=cmd_on)
+    sp.add_argument("--session")
+    sp.set_defaults(func=cmd_on)
 
     sp = sub.add_parser("off")
-    sp.add_argument("--session"); sp.set_defaults(func=cmd_off)
+    sp.add_argument("--session")
+    sp.set_defaults(func=cmd_off)
 
     sp = sub.add_parser("refresh-rules")
     sp.set_defaults(func=cmd_refresh_rules)

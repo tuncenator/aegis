@@ -6,7 +6,6 @@ AP3: autouse fixtures isolate state dir and diag emit.
 """
 import io
 import json
-from unittest.mock import patch
 
 import pytest
 

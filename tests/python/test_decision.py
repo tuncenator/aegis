@@ -53,3 +53,19 @@ def test_to_hook_output_deny_includes_reason():
     parsed = json.loads(out)
     assert parsed["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert parsed["hookSpecificOutput"]["permissionDecisionReason"] == "force push"
+
+
+def test_to_hook_output_ask_omits_reason():
+    d = decision.Decision(decision="ask", reason="looks risky")
+    out = decision.to_hook_output(d)
+    parsed = json.loads(out)
+    assert parsed["hookSpecificOutput"]["permissionDecision"] == "ask"
+    assert "permissionDecisionReason" not in parsed["hookSpecificOutput"]
+
+
+def test_to_hook_output_deny_with_empty_reason_omits_reason():
+    d = decision.Decision(decision="deny", reason="")
+    out = decision.to_hook_output(d)
+    parsed = json.loads(out)
+    assert parsed["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "permissionDecisionReason" not in parsed["hookSpecificOutput"]

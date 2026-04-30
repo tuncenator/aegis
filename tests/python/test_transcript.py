@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import pytest
-
 from classifier import transcript
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
