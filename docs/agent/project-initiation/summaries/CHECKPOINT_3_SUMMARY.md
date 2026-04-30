@@ -85,7 +85,29 @@ No helpers listed for this phase. No helper failures reported in the phase summa
 
 ## Code Review Results
 
-Pending.
+**Result**: REVIEW PASSED WITH NOTES (3 minor issues)
+
+| Severity | Issue | Location | Notes |
+|----------|-------|----------|-------|
+| Minor | Missing explicit RED capture in TDD sequence | tests/bash/orchestrator-cases.sh + orchestrator.sh | Plan called for the test commit to precede the implementation commit so a RED ("orchestrator.sh missing") state is captured. Both landed in the same commit (`99e920f`). Same-commit is acceptable per the workflow, but the phase summary has no captured RED-state evidence. |
+| Minor | Harness does not detect stdout-emitted `deny` decisions | tests/bash/orchestrator-cases.sh:17-21 | `assert()` greps stdout for `allow` / `ask` and uses exit code 2 for `deny`. If a future layer (Phase 7 classifier) emits `{"permissionDecision":"deny"}` on stdout with exit 0, the harness reports `silent`. Latent gap for Phase 7. |
+| Minor | Placeholder classifier omits trailing newline | classifier/__main__.py:18 | `json.dump(out, sys.stdout)` writes the JSON without `\n`. Claude Code likely parses stdout as a blob, but unconventional. Phase 7 should consider whether to append a newline when replacing the placeholder. |
+
+### Reviewer Notes
+
+- **Both deviations validated as sound.** The `exec`-in-pipeline -> subprocess + `exit 0` fix correctly prevents the double-invocation bug; only the catch-all (true tail) keeps `exec`, which is safe because nothing follows. The harness regex uses `"permissionDecision"[[:space:]]*:[[:space:]]*"<value>"` to match both compact and `json.dump` whitespace formats; no false positives in current corpus.
+- All 7 Functional QA checks captured byte-for-byte in `PHASE_03_SUMMARY.md` -- no paraphrased outcomes.
+- `orchestrator.sh` and `orchestrator-cases.sh` both use `set -u` only (verified `head -3`).
+- `INPUT=$(cat)` pattern correct (single-shot stdin read, re-fed via `echo "$INPUT" | ...`).
+- `jq -r '.tool_name // empty'` for tool-name extraction; no grep/sed JSON anywhere.
+- Denylist invocation correctly does NOT capture stdout; uses `rc=$?` + `[ "$rc" = 2 ] && exit 2` for hard-deny propagation.
+- `classifier/__main__.py`: stdlib only (`json`, `sys`); ASCII `--`; module docstring documents placeholder status.
+- `classifier/__init__.py`: one-line module docstring, ASCII `--`, no other content.
+- `tests/python/conftest.py`: stdlib only (`sys`, `pathlib`); `Path(__file__).resolve().parent.parent.parent` walks correctly to repo root.
+- No Phase 1-2 files modified. No helper-script edits. No secrets, hardcoded credentials, or untagged infrastructure values.
+- `CODEBASE_CONTEXT.md` consolidation matches the actual files committed; AP10 anti-pattern documented.
+
+Reviewer agent: spark-code-reviewer.
 
 ---
 
