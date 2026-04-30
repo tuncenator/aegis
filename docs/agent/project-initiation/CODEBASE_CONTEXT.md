@@ -3,7 +3,7 @@
 > **Living document** -- each phase updates this with new discoveries and changes.
 > Read this before exploring the codebase. It may already have what you need.
 >
-> Last updated by: Checkpoint 6 - consolidated Phase 7 updates
+> Last updated by: Checkpoint 7 - consolidated Phase 8 updates
 
 ---
 
@@ -115,15 +115,15 @@ Aegis is a greenfield Claude Code plugin project. At Phase 0 (this document's cr
 | `tests/python/test_main.py` | 4 chain orchestration tests (first provider, fallback, on_exhaustion, disabled session) | Autouse fixtures: `isolate_state` (STATE_DIR=tmp_path) + `mock_diag`. Uses `capsys` for stdout capture. |
 | `tests/python/test_diag.py` | 3 diag writer tests (write, append, mkdir) | Uses `tmp_path` for hermetic writes. |
 
-### To be created in Phase 8 (CLI + slash commands)
+### Created in Phase 8 (CLI + slash commands)
 
-| File Path | Purpose | Created in |
-|-----------|---------|------------|
-| `bin/aegis` | Python CLI: `aegis status`, `aegis on`, `aegis off`, `aegis refresh-rules` | Phase 8 |
-| `commands/aegis-on.md` | Slash command wrapper (calls `bin/aegis on --session "$CLAUDE_SESSION_ID"`) | Phase 8 |
-| `commands/aegis-off.md` | Slash command wrapper | Phase 8 |
-| `commands/aegis-status.md` | Slash command wrapper | Phase 8 |
-| `tests/python/test_cli.py` | CLI subcommand tests | Phase 8 |
+| File Path | Purpose | Notes |
+|-----------|---------|-------|
+| `bin/aegis` | Executable Python CLI with subcommands `status`, `on`, `off`, `refresh-rules`. Imports `classifier.state`. Honors `AEGIS_STATE_DIR` env at module load time. `REPO_ROOT` is `Path(__file__).resolve().parent.parent`. | Shebang `#!/usr/bin/env python3`. `sys.path.insert(0, REPO_ROOT)` for `classifier` imports. |
+| `commands/aegis-on.md` | Slash command wrapper: `!`-prefixed shell line calling `bin/aegis on --session "$CLAUDE_SESSION_ID"` | YAML frontmatter with `description:` |
+| `commands/aegis-off.md` | Slash command wrapper: `bin/aegis off --session "$CLAUDE_SESSION_ID"` | YAML frontmatter with `description:` |
+| `commands/aegis-status.md` | Slash command wrapper: `bin/aegis status --session "$CLAUDE_SESSION_ID"` | YAML frontmatter with `description:` |
+| `tests/python/test_cli.py` | 3 subprocess-based tests for CLI behavior. Uses `AEGIS_STATE_DIR` isolation. | Tests: `test_status_no_session_returns_message`, `test_off_then_on_round_trip`, `test_status_specific_session` |
 
 ### To be created in Phase 9 (install + readme)
 
