@@ -75,7 +75,35 @@ Phase 5 noted a setup gap (pytest missing from dev deps) but resolved it inline 
 
 ## Code Review Results
 
-Pending.
+**Result**: REVIEW PASSED WITH NOTES (5 minor issues, none blocking)
+
+| Severity | Issue | Location | Notes |
+|----------|-------|----------|-------|
+| Minor | Unused import `patch` in test_providers.py | tests/python/test_providers.py line 2 | `from unittest.mock import patch, MagicMock` -- `patch` never used. Style nit. |
+| Minor | Unused import `pytest` in test_prompt.py | tests/python/test_prompt.py line 1 | No `pytest.raises` or fixtures used. Kept verbatim per spec. |
+| Minor | Missing `to_hook_output` edge case tests | tests/python/test_decision.py | No test for `ask` output (verifying `permissionDecisionReason` is absent) or `deny` with empty reason. Implementation is correct (`d.decision == "deny" and d.reason`); adding these tests would harden the contract. |
+| Minor | pyproject.toml modified in both Phase 5 and Phase 6 commits | pyproject.toml | Both phases added the same `[dependency-groups] dev` section independently. Merge resolved without conflict (identical content) but signals pytest should have been in pyproject.toml before either phase started. |
+| Minor | `providers/__init__.py` lacks `from __future__ import annotations` | classifier/providers/__init__.py | Verification spec said "all four provider files" should have it. The `__init__.py` is one of the four; contains only a docstring so harmless, but technically deviates from spec. |
+
+### Reviewer Notes
+
+- **Security property verified**: `transcript.parse` strips `tool_result` blocks. `_user_text` returns `None` when content is a list of all `tool_result` blocks; `parse` only appends to `user_msgs` when text is truthy. Hostile file content cannot leak into classifier prompt.
+- **Doubled braces in SYSTEM_TEMPLATE confirmed**: line 32 of prompt.py has `{{"decision": ...}}` -- correct for `str.format`.
+- **`to_hook_output` deny gating confirmed**: `if d.decision == "deny" and d.reason:` (line 54). Allow/ask/empty-reason-deny correctly omit `permissionDecisionReason`.
+- **`_FENCE_RE` regex matches both fenced variants**: `r"```(?:json)?\s*(.*?)\s*```"` with `re.DOTALL`.
+- **`run_with_retry` retry semantics correct**: TimeoutExpired -> continue; OSError -> return None immediately; success criterion `r.returncode == 0 and r.stdout.strip()`.
+- **gemini.call argv**: `["gemini", "-m", spec.model, "-p", prompt]` (short `-m`).
+- **claude.call argv**: `["claude", "--model", spec.model, "-p", prompt]` (long `--model`).
+- **claude.call env mutation**: copies `os.environ` first, then sets `CCSWAP_NORENAME=1` on the copy. Test captures and verifies.
+- **Phase 1-4 files untouched**: git log restricted to those paths returned empty.
+- **Stdlib only**: no unauthorized external imports across all 6 source files.
+- **5/5 mocked subprocess.run calls** in test_providers.py.
+- **Three Phase 5 commit messages match spec exactly**; Phase 6 single commit message matches spec.
+- **Tests co-committed with implementation** (red-green-commit cadence documented in phase summary).
+- **No hardcoded secrets, no injection vulnerabilities, no helper script edits.**
+- **Evidence-vs-types**: Phase 6 evidence captures (gemini stdout shape, claude stdout shape with code fences) consistent with code argv. No drift.
+
+Reviewer agent: spark-code-reviewer.
 
 ---
 
