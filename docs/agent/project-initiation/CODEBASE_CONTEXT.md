@@ -3,7 +3,7 @@
 > **Living document** -- each phase updates this with new discoveries and changes.
 > Read this before exploring the codebase. It may already have what you need.
 >
-> Last updated by: Checkpoint 1 - consolidated Phase 1 updates
+> Last updated by: Checkpoint 2 - consolidated Phase 2 updates
 
 ---
 
@@ -49,18 +49,18 @@ Aegis is a greenfield Claude Code plugin project. At Phase 0 (this document's cr
 | `classifier/__init__.py` | Empty package marker | Created Phase 1 (not Phase 3) |
 | `classifier/log.py` | Logging setup using loguru; `setup_logger(level: str | None = None)` returns configured logger | Framework decision: loguru (not stdlib). Reads `AEGIS_LOG_LEVEL` env var, defaults to "info". Logs to stderr only. |
 
-### To be created in Phase 2 (bash deterministic layers + tests)
+### Created in Phase 2 (bash deterministic layers + tests)
 
-| File Path | Purpose | Created in |
-|-----------|---------|------------|
-| `lib/bash-hard-ask.sh` | Pure-bash ASK layer for force pushes, kubectl mutations, IaC apply, prod ssh, project-level patterns | Phase 2 |
-| `lib/protected-paths.sh` | Pure-bash ASK layer for Edit/Write/NotebookEdit on Anthropic protected paths + internals | Phase 2 |
-| `tests/bash/run.sh` | Corpus-driven harness (vendored from `~/Sync/Programs/bash-gatekeeper/tests/run.sh`, then adapted to dispatch to all four layers) | Phase 2 |
-| `tests/bash/corpus/should-allow.txt` | Vendored from bash-gatekeeper repo (~342 lines) | Phase 2 (vendored) |
-| `tests/bash/corpus/should-deny.txt` | Combined: vendored from bash-gatekeeper (~227 lines) plus the deny patterns from `docs/superpowers/plans/2026-04-30-aegis.md` Task 3 Step 3 (nuclear rm, curl-pipe-sh, AI attribution scrubs) | Phase 2 |
-| `tests/bash/corpus/should-ask.txt` | New: hard-ask patterns (force pushes, kubectl exec/delete/apply, IaC apply, cloud mass-deletes, prod ssh) | Phase 2 |
-| `tests/bash/corpus/protected-paths.txt` | New: file paths that protected-paths.sh must ASK for | Phase 2 |
-| `tests/bash/corpus/known-not-allowed.txt` | Vendored from bash-gatekeeper (~38 lines, NOTICE-bucket entries -- a known-not-allowed command that now allows is reported but does not fail the run) | Phase 2 |
+| File Path | Purpose | Notes |
+|-----------|---------|-------|
+| `lib/bash-hard-ask.sh` | Pure-bash ASK layer for force pushes, push-to-default-branch, kubectl mutations, IaC apply, cloud mass deletes, prod ssh, project-level patterns from `<cwd>/.aegis/hard-ask.toml` | Executable, `set -u` only. SSH regex uses `[a-zA-Z0-9._-]*` prefix (zero-or-more) to match leading-prod hostnames like `prod-db-01`. |
+| `lib/protected-paths.sh` | Pure-bash ASK layer for Edit/Write/NotebookEdit on Anthropic protected paths (.git, .vscode, .idea, .husky, /etc, system bins, /var/log, SSH dirs, HOME dotfiles) plus `.claude` with carve-outs for `.claude/{commands,agents,skills,worktrees}` | Executable, `set -u` only. Tilde expansion via `${PATH_RAW/#\~/$HOME}`. |
+| `tests/bash/run.sh` | Corpus-driven harness dispatching four corpora to four hooks; `run_bash_cmd`, `run_gk_cmd`, `run_path_cmd` helpers; GATEKEEPER_DEBUG coverage probes | Executable, `set -u`. Has `GATEKEEPER_VENDOR_SRC` fallback for 4 path-bound allow entries. `should-deny.txt` dispatches through `run_gk_cmd` (combined gatekeeper+denylist binary logic) not directly to `$DENYLIST`. |
+| `tests/bash/corpus/should-allow.txt` | Vendored from bash-gatekeeper repo (342 lines) | Byte-identical to source |
+| `tests/bash/corpus/should-deny.txt` | Combined: vendored from bash-gatekeeper (227 lines) + Aegis additions (18 lines: nuclear rm, curl-pipe-sh, AI attribution scrubs) separated by `# === Aegis additions (Task 3 Step 3) ===` | 245 total entries |
+| `tests/bash/corpus/should-ask.txt` | Hard-ask patterns: force pushes, push-to-default-branch, kubectl exec/delete/apply, IaC apply, cloud mass deletes, prod ssh | 20 entries |
+| `tests/bash/corpus/protected-paths.txt` | File paths that protected-paths.sh must ASK for on Edit/Write/NotebookEdit | 24 entries |
+| `tests/bash/corpus/known-not-allowed.txt` | Vendored from bash-gatekeeper (38 lines, NOTICE-bucket: entries that now allow are reported but don't fail the run) | Byte-identical to source |
 
 ### To be created in Phase 3 (orchestrator + Python skeleton)
 
