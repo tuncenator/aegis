@@ -50,7 +50,7 @@
 ### Conductor
 
 - **Total Batches**: 8
-- **Current Batch**: 2
+- **Current Batch**: 3
 - **Pacing**: auto-refresh
 - **Batches Per Session**: 4
 - **Execution Plan**: docs/agent/project-initiation/EXECUTION_PLAN.md
@@ -58,16 +58,16 @@
 ---
 
 **Last Updated:** 2026-04-30
-**Current Phase:** 2 of 9
-**Phase Name:** Bash deterministic layers + test corpus
-**Progress:** 11% (1/9 phases complete)
+**Current Phase:** 3 of 9
+**Phase Name:** Orchestrator + Python skeleton
+**Progress:** 22% (2/9 phases complete)
 
 ---
 
 ## Progress Bar
 
 ```
-[#--------] 11% (1/9)
+[##-------] 22% (2/9)
 ```
 
 ---
@@ -77,8 +77,8 @@
 | Phase | Name | Status |
 |-------|------|--------|
 | 1 | Scaffold + vendor bash + logging | `[Complete]` |
-| 2 | Bash deterministic layers + test corpus | `[Current]` |
-| 3 | Orchestrator + Python skeleton | `[Pending]` |
+| 2 | Bash deterministic layers + test corpus | `[Complete]` |
+| 3 | Orchestrator + Python skeleton | `[Current]` |
 | 4 | Classifier state + rules | `[Pending]` |
 | 5 | Classifier transcript + prompt + decision | `[Pending]` |
 | 6 | Provider chain | `[Pending]` |
@@ -90,14 +90,14 @@
 
 ## Instructions for Agents
 
-1. Read `phase_plans/PHASE_02.md` for detailed requirements for Phase 2
-2. Read recent phase summary (`summaries/PHASE_01_SUMMARY.md`) for context
+1. Read `phase_plans/PHASE_03.md` for detailed requirements for Phase 3
+2. Read recent phase summaries (`summaries/PHASE_02_SUMMARY.md`, `summaries/PHASE_01_SUMMARY.md`) for context
 3. Complete the phase following the build-verify-commit cycle
-4. Create `summaries/PHASE_02_SUMMARY.md`
+4. Create `summaries/PHASE_03_SUMMARY.md`
 5. Update this file:
-   - Mark Phase 2 as `[Complete]`
-   - Set Phase 3 as `[Current]`
-   - Update "Current Phase" to "3 of 9"
+   - Mark Phase 3 as `[Complete]`
+   - Set Phase 4 as `[Current]`
+   - Update "Current Phase" to "4 of 9"
    - Update "Progress" percentage and count
    - Update progress bar (each `#` = completed phase, each `-` = remaining phase)
 
