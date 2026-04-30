@@ -50,7 +50,7 @@
 ### Conductor
 
 - **Total Batches**: 8
-- **Current Batch**: 3
+- **Current Batch**: 4
 - **Pacing**: auto-refresh
 - **Batches Per Session**: 4
 - **Execution Plan**: docs/agent/project-initiation/EXECUTION_PLAN.md
@@ -58,16 +58,16 @@
 ---
 
 **Last Updated:** 2026-04-30
-**Current Phase:** 3 of 9
-**Phase Name:** Orchestrator + Python skeleton
-**Progress:** 22% (2/9 phases complete)
+**Current Phase:** 4 of 9
+**Phase Name:** Classifier state + rules
+**Progress:** 33% (3/9 phases complete)
 
 ---
 
 ## Progress Bar
 
 ```
-[##-------] 22% (2/9)
+[###------] 33% (3/9)
 ```
 
 ---
@@ -78,8 +78,8 @@
 |-------|------|--------|
 | 1 | Scaffold + vendor bash + logging | `[Complete]` |
 | 2 | Bash deterministic layers + test corpus | `[Complete]` |
-| 3 | Orchestrator + Python skeleton | `[Current]` |
-| 4 | Classifier state + rules | `[Pending]` |
+| 3 | Orchestrator + Python skeleton | `[Complete]` |
+| 4 | Classifier state + rules | `[Current]` |
 | 5 | Classifier transcript + prompt + decision | `[Pending]` |
 | 6 | Provider chain | `[Pending]` |
 | 7 | Classifier main + diag logging | `[Pending]` |
@@ -90,14 +90,14 @@
 
 ## Instructions for Agents
 
-1. Read `phase_plans/PHASE_03.md` for detailed requirements for Phase 3
-2. Read recent phase summaries (`summaries/PHASE_02_SUMMARY.md`, `summaries/PHASE_01_SUMMARY.md`) for context
+1. Read `phase_plans/PHASE_04.md` for detailed requirements for Phase 4
+2. Read recent phase summaries (`summaries/PHASE_03_SUMMARY.md`, `summaries/PHASE_02_SUMMARY.md`) for context
 3. Complete the phase following the build-verify-commit cycle
-4. Create `summaries/PHASE_03_SUMMARY.md`
+4. Create `summaries/PHASE_04_SUMMARY.md`
 5. Update this file:
-   - Mark Phase 3 as `[Complete]`
-   - Set Phase 4 as `[Current]`
-   - Update "Current Phase" to "4 of 9"
+   - Mark Phase 4 as `[Complete]`
+   - Set Phase 5 as `[Current]`
+   - Update "Current Phase" to "5 of 9"
    - Update "Progress" percentage and count
    - Update progress bar (each `#` = completed phase, each `-` = remaining phase)
 
