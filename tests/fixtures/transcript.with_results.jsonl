@@ -1,0 +1,5 @@
+{"type":"user","message":{"content":"check stuff"}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"git status"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","content":"On branch main\nnothing to commit"}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"clean tree"}]}}
+{"type":"user","message":{"content":"now push"}}
