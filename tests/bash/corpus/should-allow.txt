@@ -1,0 +1,342 @@
+# bash-gatekeeper regression corpus -- commands that MUST auto-approve.
+# Format: one shell command per line. Blank lines and # comments ignored.
+# When a /gatekeeper patch lands, the triggering command(s) get appended here.
+
+# --- simple read-only commands ---
+ls
+ls -la
+pwd
+whoami
+date
+uname -a
+uptime
+hostname
+id
+df -h
+du -sh /tmp
+free -m
+
+# --- file / text inspection ---
+cat /etc/hostname
+head -10 /etc/passwd
+tail -5 /etc/passwd
+wc -l /etc/passwd
+stat /etc/passwd
+file /bin/bash
+realpath /etc/passwd
+dirname /etc/passwd
+basename /etc/passwd
+readlink /bin/sh
+
+# --- search / find ---
+grep root /etc/passwd
+rg pattern .
+find . -name '*.sh'
+find / -maxdepth 2 -type d
+find . -type f -executable
+find /home -name '*.tmp' -type f
+which bash
+type ls
+
+# --- text processing ---
+sort /etc/passwd
+uniq -c /etc/passwd
+cut -f1 -d: /etc/passwd
+awk '{print $1}' /etc/passwd
+sed -n '1,5p' /etc/passwd
+jq '.' /etc/passwd
+yq '.foo' /etc/passwd
+
+# --- network read ---
+curl -s https://example.com
+wget -O- https://example.com
+dig google.com
+nslookup google.com
+host google.com
+ip addr
+ss -tln
+
+# --- process inspection ---
+ps aux
+pgrep nginx
+pstree
+lsof -i
+top -bn1
+
+# --- hashing / encoding ---
+sha256sum /etc/passwd
+md5sum /etc/passwd
+base64 /etc/hostname
+
+# --- absolute path to allowlisted binary ---
+/usr/bin/grep root /etc/passwd
+/bin/ls
+/usr/local/bin/jq .
+
+# --- transparent wrappers ---
+time ls
+timeout 5 ls
+nice -n 10 ls
+nohup ls
+env FOO=bar ls
+env ls
+
+# --- env-var prefix ---
+FOO=bar ls
+PGPASSWORD=secret psql -c 'SELECT 1'
+
+# --- compound: operators ---
+ls && pwd
+ls || echo failed
+ls; pwd
+ls | head -5
+cat /etc/passwd | grep root | wc -l
+ps aux | grep nginx | head -3
+find . -name '*.sh' | wc -l
+echo a 2>/dev/null; echo b
+ls 2>/dev/null && echo done
+(ls && pwd)
+
+# --- the original command from the 2026-04-25 patch session ---
+crontab -l 2>/dev/null; echo "---"; ls /etc/cron.d/ 2>/dev/null; echo "---"; systemctl list-timers --all 2>/dev/null | grep -i restic
+
+# --- lints / tests ---
+pytest
+pytest tests/
+ruff check .
+mypy src
+eslint .
+prettier --check .
+black --check .
+shellcheck script.sh
+
+# --- build / language ---
+python -c 'print(1)'
+python3 script.py
+node script.js
+npm install
+npm test
+yarn build
+cargo test
+go test ./...
+make
+
+# --- uv / pipx ---
+uv run pytest
+uv run ruff check
+
+# --- source venv && tool ---
+source venv/bin/activate && pytest
+. .venv/bin/activate && ruff check
+
+# --- python -m pytest ---
+python -m pytest tests/
+python3 -m pytest
+/usr/bin/python3 -m pytest
+
+# --- git read ---
+git status
+git log --oneline -5
+git diff
+git diff HEAD~1
+git show abc1234
+git branch -a
+git tag
+git remote -v
+git rev-parse HEAD
+git ls-files
+git blame README.md
+git config --get user.name
+git config user.email
+git -C /tmp/repo status
+git -c color.ui=always log
+
+# --- git safe-write ---
+git add file.py
+git commit -m 'message'
+git checkout main
+git switch main
+git fetch origin
+git pull
+git stash
+git restore file.py
+git reset HEAD~1
+
+# --- DB read-only ---
+psql -c 'SELECT 1'
+psql -c 'SELECT * FROM users LIMIT 5'
+mysql -e 'SHOW TABLES'
+mariadb -e 'SHOW DATABASES'
+mongosh --eval 'db.users.find().limit(5)'
+redis-cli GET mykey
+redis-cli KEYS '*'
+sqlite3 db.sqlite 'SELECT * FROM t'
+
+# --- AWS read-only ---
+aws ec2 describe-instances
+aws s3 ls
+aws s3 ls s3://bucket/
+aws sts get-caller-identity
+aws ec2 describe-instances --region us-east-1
+
+# --- GCP read-only ---
+gcloud projects list
+gcloud compute instances describe foo
+gcloud config list
+gcloud auth list
+gsutil ls gs://bucket
+gcloud storage ls gs://bucket
+bq show ds.table
+bq ls myproject:dataset
+
+# --- docker read-only ---
+docker ps
+docker images
+docker logs container1
+docker inspect container1
+docker stats --no-stream
+
+# --- kubectl read-only ---
+kubectl get pods
+kubectl describe pod foo
+kubectl logs foo
+kubectl top nodes
+kubectl version
+
+# --- gh read-only ---
+gh status
+gh repo view
+gh repo list
+gh pr list
+gh pr view 123
+gh pr diff 123
+gh issue list
+gh run list
+gh search repos foo
+gh api repos/foo/bar
+gh api user
+
+# --- acli read-only ---
+acli jira workitem search
+acli jira workitem view ABC-123
+acli jira workitem comment list ABC-123
+acli jira board get
+
+# --- ssh / sftp / scp ---
+ssh host
+sftp host
+
+# --- conclave ---
+conclave-init
+conclave-index
+conclave-brief
+
+# --- gemini ---
+gemini -p hello
+gemini -m gemini-3.1-pro-preview -p hello
+
+# --- systemctl read-only (added 2026-04-25) ---
+systemctl status sshd
+systemctl status
+systemctl list-timers
+systemctl list-timers --all
+systemctl list-units
+systemctl is-active sshd
+systemctl is-enabled sshd
+systemctl is-failed sshd
+systemctl show nginx
+systemctl cat nginx
+systemctl get-default
+
+# --- crontab read-only (added 2026-04-25) ---
+crontab -l
+crontab -l -u root
+crontab -u tunc -l
+
+# --- gatekeeper repo test runner (added 2026-04-26) ---
+./tests/run.sh
+./tests/run.sh 2>&1 | tail -20
+tests/run.sh
+cd /home/tunc/Sync/Programs/bash-gatekeeper && ./tests/run.sh 2>&1 | tail -20
+/home/tunc/Sync/Programs/bash-gatekeeper/tests/run.sh
+/home/tunc/Sync/Programs/bash-gatekeeper/tests/run.sh 2>&1 | tail -20
+bash tests/run.sh
+bash tests/run.sh 2>&1 | tail -20
+bash ./tests/run.sh
+cd /home/tunc/Sync/Programs/bash-gatekeeper && bash tests/run.sh 2>&1 | tail -20
+bash /home/tunc/Sync/Programs/bash-gatekeeper/tests/run.sh
+bash /home/tunc/Sync/Programs/bash-gatekeeper/tests/run.sh 2>&1 | tail -20
+
+# --- hardware/kernel diagnostics (added 2026-04-26) ---
+lsusb
+lsusb -v
+lspci
+lspci -k
+lscpu
+lsmod
+lshw -short
+dmesg
+dmesg | tail -30
+lsusb | grep -i blue; echo '---'; dmesg 2>/dev/null | grep -iE 'bluetooth|btusb|hci' | tail -30
+
+# --- restic read-only + standalone export (added 2026-04-26) ---
+export RESTIC_REPOSITORY="sftp:WATCHTOWER:/home/tunc/Attic/restic/STORMTREE"
+export FOO=bar BAZ=qux
+restic snapshots
+restic ls --long cda8c06e
+restic stats
+restic check
+SSH_AUTH_SOCK=/run/user/1000/ssh-agent.socket restic ls --long cda8c06e
+export RESTIC_REPOSITORY="sftp:WATCHTOWER:/home/tunc/Attic/restic/STORMTREE"
+export RESTIC_PASSWORD_FILE="/home/tunc/Sync/sync_misc/recovery/restic.key"
+SSH_AUTH_SOCK=/run/user/1000/ssh-agent.socket restic ls --long cda8c06e 2>/dev/null > /tmp/restic-ls.txt
+wc -l /tmp/restic-ls.txt
+head -3 /tmp/restic-ls.txt
+
+# --- journalctl read-only (added 2026-04-26) ---
+journalctl -u bluetooth --since '5 min ago' --no-pager 2>/dev/null | tail -30; echo '---live---'; journalctl --user --since '5 min ago' --no-pager 2>/dev/null | grep -iE 'bluez|hci' | tail -20
+journalctl -u sshd --no-pager | tail -50
+journalctl --user -b 0 --no-pager
+journalctl -k --since yesterday --no-pager | grep -i error
+
+# --- ANSI-C $'...' strings with escaped quotes around embedded operators ---
+# The quote-neutralizer must treat \' inside $'...' as escaped, not as a
+# pair-closing quote, otherwise the embedded ;/| leak into segment splitting.
+jq -n --arg cmd $'journalctl -u bluetooth --since \'5 min ago\' --no-pager 2>/dev/null | tail -30; echo \'---live---\'; journalctl --user --since \'5 min ago\' --no-pager 2>/dev/null | grep -iE \'bluez|hci\' | tail -20' '{tool_input:{command:$cmd}}'
+echo $'foo\'bar; baz\'qux | quux'
+
+# --- backslash-newline line continuations (added 2026-04-26) ---
+# Single logical command split across lines is shell whitespace, not
+# multi-line compound; the hook normalizes \<newline> before segment walk.
+conclave-brief launch \
+     --aim "Light review surfacing correctness bugs and design flaws in production code: logic errors, lifecycle/state-machine integrity (swap, oauth, refresh, popup state), naming/pattern consistency, and maintainability friction." \
+     --scope "path:." \
+     --personas "correctness,maintainability,consistency,flow-integrity" \
+     --preset medium \
+     --persona-model claude-sonnet-4-6 \
+     --exclude "test_*.py" \
+     --preview
+ls \
+   -la \
+   /tmp
+git log \
+   --oneline \
+   -20
+
+# --- sleep and headless browsers (added 2026-04-27) ---
+sleep 1
+sleep 5
+chromium --headless=new --disable-gpu --no-sandbox --screenshot=/tmp/screenshot.png http://localhost:3000/
+google-chrome --headless --screenshot=/tmp/shot.png http://localhost:8080/
+curl -s -o /dev/null http://localhost:3000/; sleep 1; chromium --headless=new --disable-gpu --no-sandbox --hide-scrollbars --window-size=1700,1180 --force-prefers-reduced-motion --virtual-time-budget=4000 --screenshot=/tmp/onlayer-overview-full.png http://localhost:3000/ 2>&1 | tail -2; ls -la /tmp/onlayer-overview-full.png
+# --- gam read-only (patched 2026-04-28) ---
+gam info user bengisu.es@onlayer.com name primaryemail suspended archived 2>&1 | head -15
+gam info user admin@example.com
+gam print users query "orgUnitPath='/Sales'"
+gam show users
+gam report login user all
+gam check suspended admin@example.com
+gam version
+gam showsections
+gam user admin@example.com show labels
+gam users admin@example.com print messages

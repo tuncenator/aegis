@@ -1,0 +1,38 @@
+# Commands hit by /gatekeeper that we chose NOT to fix in the hook.
+# Each entry has TWO comment lines, then the command:
+#   # reason: <one-line why we declined to patch>
+#   # seen: <YYYY-MM-DD>[, <YYYY-MM-DD>...] (<N>x)
+#   <command>
+# The seen list is the trend signal -- if a command racks up 3+ hits the
+# tradeoff probably needs another look. Match by command shape (base + key
+# flags), not exact string: when /gatekeeper hits a near-duplicate it should
+# bump the existing entry's seen list and Nx counter, not add a new entry.
+#
+# The runner expects these to deny; if one starts allowing, it emits a NOTICE
+# (not a failure) so we know to move it to should-allow.txt.
+#
+# Format example:
+#   # reason: requires allowing bare $(...) which smuggles writes
+#   # seen: 2026-04-25, 2026-05-12 (2x)
+#   echo $(date) | tee /tmp/log
+
+# reason: bare `pipx run X` denies because pipx isn't in is_safe_cmd's
+# allowlist (only the compound `^(uv run|pipx run) ...` regex matches).
+# Adding pipx to the allowlist would auto-execute arbitrary upstream
+# packages, no safer than the current state.
+# seen: 2026-04-25 (1x)
+pipx run black .
+
+# reason: bluetoothctl not in is_safe_cmd, plus $(...) trips HAS_SUBSHELL.
+# Allowing read-only bluetoothctl verbs is fine in isolation, but the
+# command-substitution half needs a generic "recursively safety-check
+# $(...) bodies" hole that would weaken the load-bearing subshell gate.
+# seen: 2026-04-26 (1x)
+bluetoothctl devices Connected; echo '---'; bluetoothctl info $(bluetoothctl devices Connected | awk '{print $2}' | head -1) 2>/dev/null
+
+# reason: diff with two <(...) process substitutions trips HAS_SUBSHELL.
+# Allowing it requires recursing safety-checks into <(...) bodies, the
+# same hole that would weaken the load-bearing subshell gate. Workaround
+# is two temp files or cat-ing both ranges.
+# seen: 2026-04-26 (1x)
+diff <(sed -n '44,52p' /home/tunc/Sync/Programs/ccswap/refresh.py) <(sed -n '69,77p' /home/tunc/Sync/Programs/ccswap/oauth_login.py)
