@@ -3,7 +3,7 @@
 > **Living document** -- each phase updates this with new discoveries and changes.
 > Read this before exploring the codebase. It may already have what you need.
 >
-> Last updated by: Checkpoint 5 - consolidated Phase 5 + Phase 6 updates
+> Last updated by: Checkpoint 6 - consolidated Phase 7 updates
 
 ---
 
@@ -66,9 +66,9 @@ Aegis is a greenfield Claude Code plugin project. At Phase 0 (this document's cr
 
 | File Path | Purpose | Notes |
 |-----------|---------|-------|
-| `orchestrator.sh` | PreToolUse hook entry. Dispatches by `tool_name` through read-only fast path, Bash pipeline (4 layers), Edit/Write/NotebookEdit pipeline (2 layers), catch-all to classifier. | Executable, `set -u` only. Non-tail classifier invocations use plain subprocess + `exit 0` (not `exec`) to avoid double-invocation bug. `exec` only at true script tail (catch-all). `AEGIS_TEST_MOCK_DECISION` env var honored via `mock_classifier` function. |
+| `orchestrator.sh` | PreToolUse hook entry. Dispatches by `tool_name` through read-only fast path, Bash pipeline (4 layers), Edit/Write/NotebookEdit pipeline (2 layers), catch-all to classifier. Phase 7 added `SESS` extraction, `diag_emit` shell helper (lines 44-60), and 5 `diag_emit` call sites at deterministic exit points. | Executable, `set -u` only. Non-tail classifier invocations use plain subprocess + `exit 0` (not `exec`). `exec` only at true script tail (catch-all). `AEGIS_TEST_MOCK_DECISION` env var honored via `mock_classifier` function. `diag_emit` writes to `~/.cache/aegis/decisions.jsonl` with `model=null`, `latency_ms=0`. |
 | `tests/bash/orchestrator-cases.sh` | 10-assertion end-to-end orchestrator harness covering all dispatch paths. | Executable, `set -u`. Grep uses `-E '"permissionDecision"[[:space:]]*:[[:space:]]*"<decision>"'` to match both compact (layer scripts) and `json.dump` (classifier) whitespace formats. |
-| `classifier/__main__.py` | Placeholder entrypoint (Phase 7 replaces entirely). Reads stdin, writes `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask"}}` to stdout, exit 0. | Uses `json.dump` (spaces after colons). No logging, no error handling, intentionally minimal. |
+| `classifier/__main__.py` | Full chain orchestrator (replaced Phase 3 placeholder). State load, early-exit on disabled, rules/snapshot/transcript/prompt assembly, provider chain walk with per-provider repair on malformed response, on_exhaustion fallback, state counter update + save, diag emit, hook output on stdout. | APIs: `main() -> int`, `_call_provider(spec, system, user) -> str \| None`, `_read_claude_md(cwd) -> str \| None`. |
 | `tests/python/conftest.py` | pytest sys.path config: inserts repo root so `from classifier import ...` works. | `REPO_ROOT = Path(__file__).resolve().parent.parent.parent` |
 
 ### Created in Phase 4 (state + rules)
@@ -105,15 +105,15 @@ Aegis is a greenfield Claude Code plugin project. At Phase 0 (this document's cr
 | `classifier/providers/claude.py` | Claude CLI provider; exports `call(spec, system, user)`. Invokes `claude --model MODEL -p PROMPT`. Sets `CCSWAP_NORENAME=1` in env copy. | Uses `--model` long flag. Claude wraps JSON output in markdown code fences. |
 | `tests/python/test_providers.py` | 5 provider tests with `monkeypatch.setattr(subprocess, "run", ...)` | All subprocess calls mocked; no real CLI invocations. |
 
-### To be created in Phase 7 (main + diag)
+### Created in Phase 7 (main + diag)
 
-| File Path | Purpose | Created in |
-|-----------|---------|------------|
-| `classifier/__main__.py` | Replace placeholder. Full chain orchestration: state -> rules -> transcript -> prompt -> provider chain -> decision -> diag. | Phase 7 |
-| `classifier/diag.py` | JSONL append writer for decision log | Phase 7 |
-| `orchestrator.sh` (modify) | Add `diag_emit` shell helper; call from each deterministic layer's exit path | Phase 7 |
-| `tests/python/test_main.py` | Chain orchestration tests (provider succeeds, falls to next, on_exhaustion, disabled session) | Phase 7 |
-| `tests/python/test_diag.py` | Diag writer tests | Phase 7 |
+| File Path | Purpose | Notes |
+|-----------|---------|-------|
+| `classifier/__main__.py` | Full chain orchestrator (REPLACED Phase 3 placeholder). State -> rules -> transcript -> prompt -> provider chain -> decision -> diag. | APIs: `main() -> int`, `_call_provider(spec, system, user) -> str \| None`, `_read_claude_md(cwd) -> str \| None`. |
+| `classifier/diag.py` | JSONL decision log writer | `emit(path, *, session_id, tool, layer, decision, reason, model, latency_ms, tokens=None) -> None`. Auto-creates parent dir. |
+| `orchestrator.sh` (modified) | Added `SESS` extraction, `diag_emit` shell helper (lines 44-60), 5 call sites at deterministic exit points | `diag_emit` hardcodes `~/.cache/aegis/decisions.jsonl`. No `diag_emit` on classifier-dispatch branches. |
+| `tests/python/test_main.py` | 4 chain orchestration tests (first provider, fallback, on_exhaustion, disabled session) | Autouse fixtures: `isolate_state` (STATE_DIR=tmp_path) + `mock_diag`. Uses `capsys` for stdout capture. |
+| `tests/python/test_diag.py` | 3 diag writer tests (write, append, mkdir) | Uses `tmp_path` for hermetic writes. |
 
 ### To be created in Phase 8 (CLI + slash commands)
 
@@ -321,7 +321,7 @@ If the user has another PreToolUse hook in `settings.json`, Claude Code runs bot
 
 - Bash tests: `tests/bash/run.sh`
 - Orchestrator tests (mocked classifier): `AEGIS_TEST_MOCK_DECISION=ask tests/bash/orchestrator-cases.sh`
-- Orchestrator tests (real classifier path): `unset AEGIS_TEST_MOCK_DECISION && tests/bash/orchestrator-cases.sh` (valid from Phase 3; placeholder returns ASK)
+- Orchestrator tests (real classifier path): `unset AEGIS_TEST_MOCK_DECISION && tests/bash/orchestrator-cases.sh` (non-deterministic after Phase 7: real classifier may return deny instead of ask for novel commands; mocked mode is the regression gate)
 - Python tests: `uv run python -m pytest tests/python/ -v`
 - Full suite (verification command): `tests/bash/run.sh && AEGIS_TEST_MOCK_DECISION=ask tests/bash/orchestrator-cases.sh && uv run python -m pytest tests/python/ -v`
 
