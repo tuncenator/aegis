@@ -87,7 +87,32 @@ No helpers listed for Phase 9. No helper issues reported in the phase summary.
 
 ## Code Review Results
 
-Pending.
+**Result**: REVIEW PASSED (no issues found)
+
+| Severity | Issue | Notes |
+|----------|-------|-------|
+| -- | -- | None. The cleanest review of the entire run. |
+
+### Reviewer Notes
+
+- **install.sh**: shebang `#!/usr/bin/env bash`, mode `-rwxr-xr-x`, `set -e` and `set -u` immediately after comment block. Pass.
+- **Step 1 detection**: `~/Sync/.claude` first, falls back to `~/.claude/plugins`. Matches user's syncthing setup. Pass.
+- **Step 2 idempotency**: `[ -L ... ] || [ -d ... ]` covers both symlinks and directories. Skip and create branches both present. Pass.
+- **Step 3 conditional refresh**: `[ ! -s ... ]` (exists AND non-empty); `|| echo "warning: ..."` tolerates failure. Pass.
+- **Step 4 idempotency**: outer `[ -d ~/.local/bin ]`, inner `[ ! -L ~/.local/bin/aegis ]`. Both branches present, outer else has PATH note. Pass.
+- **Step 5 idempotency**: `[ ! -f ]` check; skip branch prints `Config already present:`. Pass.
+- **Trailing output**: blank line + `Aegis installed.` + `Restart Claude Code to load the plugin.`. Matches spec.
+- **No reference to settings.json** anywhere in install.sh (plugin format auto-discovers). Pass.
+- **TOML heredoc body byte-identical to plan**: all required sections verified -- `[classifier]` chain (3 providers with correct alignment), `[counters]` (consecutive_deny_limit=3, total_deny_limit=20), `[rules]` (snapshot_ttl_days=14), `[context]` (last_user_messages=10, include_claude_md=true, claude_md_max_tokens=4000), `[environment]` (correct trusted_orgs/domains/buckets/services), `[logging]` (diag_path, level=info). Pass.
+- **README.md**: first line `# Aegis`, last line is the spec link. Zero unicode characters. All pipeline arrows use `->`. All 7 required `## ` sections present (Pipeline, Install, Configuration, Toggles, Standalone bash-only mode, Development, Spec). Pass.
+- **Phase 1-8 files unmodified**: `git log --oneline db7107fc..aa1b89e9 -- ...full path list...` returned empty.
+- **Phase 9 commit message** matches plan spec: `Phase 9: idempotent installer + full README`. Not the conductor bracketed format.
+- **Functional QA**: 8/8 smoke checks with byte-for-byte evidence. Smoke 3 deviation (real classifier returns "deny" not "ask" on novel cmd) documented but correctly NOT marked as failure (it's a Phase 7-era harness issue). Smoke 6 captured live gemini call.
+- **Spec coverage cross-check**: 22-row table in phase summary maps every plan Task to its delivering phase. All rows DELIVERED.
+- **No security issues**: trusted_services values (`FGT_001_CLAUDE`, `VICAR`, `STORMTREE`, `CORPSEFIRE`) are hostnames/identifiers, not credentials. `claude_md_max_tokens = 4000` is a config key, not a token credential.
+- **No helper script edits**, no test-first violations (this phase has no new unit tests by design), no evidence-vs-types drift.
+
+Reviewer agent: spark-code-reviewer.
 
 ---
 
