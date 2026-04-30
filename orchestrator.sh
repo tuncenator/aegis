@@ -63,7 +63,8 @@ if [ "$TOOL" = "Bash" ]; then
 
   # Layer 4: classifier.
   mock_classifier && exit 0
-  echo "$INPUT" | exec env PYTHONPATH="$DIR" python3 -m classifier
+  echo "$INPUT" | env PYTHONPATH="$DIR" python3 -m classifier
+  exit 0
 fi
 
 # Edit / Write / NotebookEdit: protected-paths first, then classifier.
@@ -72,7 +73,8 @@ case "$TOOL" in
     out=$(echo "$INPUT" | "$LIB/protected-paths.sh")
     if [ -n "$out" ]; then echo "$out"; exit 0; fi
     mock_classifier && exit 0
-    echo "$INPUT" | exec env PYTHONPATH="$DIR" python3 -m classifier
+    echo "$INPUT" | env PYTHONPATH="$DIR" python3 -m classifier
+    exit 0
     ;;
 esac
 

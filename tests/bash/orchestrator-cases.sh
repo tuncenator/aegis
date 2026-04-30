@@ -16,8 +16,8 @@ assert() {
   rc=$?
   local got_decision="silent"
   if [ "$rc" = 2 ]; then got_decision="deny"
-  elif echo "$out" | grep -q '"permissionDecision":"allow"'; then got_decision="allow"
-  elif echo "$out" | grep -q '"permissionDecision":"ask"'; then got_decision="ask"
+  elif echo "$out" | grep -qE '"permissionDecision"[[:space:]]*:[[:space:]]*"allow"'; then got_decision="allow"
+  elif echo "$out" | grep -qE '"permissionDecision"[[:space:]]*:[[:space:]]*"ask"'; then got_decision="ask"
   fi
   if [ "$got_decision" = "$want_decision" ] && [ "$rc" = "$want_exit" ]; then
     PASS=$((PASS+1))
