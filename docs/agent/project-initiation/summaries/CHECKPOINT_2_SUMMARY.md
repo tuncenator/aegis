@@ -71,7 +71,25 @@ No helpers were listed for Phase 2. No helpers invoked. No repairs needed.
 
 ## Code Review Results
 
-Pending. This section will be filled by the code review agent.
+**Result**: REVIEW PASSED WITH NOTES (1 important + 3 minor)
+
+| Severity | Issue | Location | Notes |
+|----------|-------|----------|-------|
+| Important | SSH prod regex over-matches non-production hostnames | lib/bash-hard-ask.sh:56 | Reviewer flagged the `[a-zA-Z0-9._-]*(prod\|production)[a-zA-Z0-9._-]*` regex matches any host containing the substring "prod" anywhere (e.g. `reproduced-bug`, `unproductive-host`). This is by-design per the deviation: false ASK is annoying but safe; false silent on a real prod host is dangerous. The reviewer recommends a future refinement (word boundary or start anchor) to reduce UX false positives, but does NOT classify this as a security defect. Not blocking. |
+| Minor | `GATEKEEPER_VENDOR_SRC` hardcodes absolute path | tests/bash/run.sh:28 | Test-only fallback pointing at `/home/tunc/Sync/Programs/bash-gatekeeper/bash-gatekeeper.sh`. Documented as fragile; if source moves, 4 allow-corpus entries fail. Tracked in this summary's "Notes for Next Batch". |
+| Minor | should-deny.txt entry-count discrepancy in summary doc | docs/agent/project-initiation/summaries/PHASE_02_SUMMARY.md | Phase summary lists "245 deny entries" while the harness counts 185 effective entries after backslash-continuation reassembly. Documentation inaccuracy only; no functional impact on the pipeline. |
+| Minor | `protected-paths.txt` appears empty in commit 1, populated in commit 2 | git history | Acceptable RED -> GREEN pattern: the placeholder lets the harness iterate over zero entries without erroring before the layer exists. Just a commit-hygiene note. |
+
+### Reviewer Notes
+
+- **All three documented deviations were validated as sound.** `run_gk_cmd` resolves the binary gatekeeper+denylist semantics correctly without weakening either. SSH regex broadening covers `prod-db-01`-style hostnames the original regex missed; the false-positive concern is UX, not security. `GATEKEEPER_VENDOR_SRC` fallback is test-only and never modifies vendored production code.
+- Functional QA evidence in `PHASE_02_SUMMARY.md` was captured byte-for-byte for all five surface checks (no paraphrased outcomes).
+- Test-first compliance: corpus and harness landed before / alongside the layer scripts they exercise; data-driven testing pattern is correctly applied.
+- Vendored Phase 1 scripts (`lib/bash-gatekeeper.sh`, `lib/bash-denylist.sh`) untouched. Confirmed via `git diff` on those files (empty).
+- No secrets, no hardcoded production credentials, no helper-script edits.
+- Bash discipline: `set -u` only, no `set -e`, in all three new scripts. `%REASON%` parameter substitution used correctly in both layer scripts.
+
+Reviewer agent: spark-code-reviewer.
 
 ---
 
