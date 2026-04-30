@@ -50,7 +50,7 @@
 ### Conductor
 
 - **Total Batches**: 8
-- **Current Batch**: 4
+- **Current Batch**: 5
 - **Pacing**: auto-refresh
 - **Batches Per Session**: 4
 - **Execution Plan**: docs/agent/project-initiation/EXECUTION_PLAN.md
@@ -58,16 +58,16 @@
 ---
 
 **Last Updated:** 2026-04-30
-**Current Phase:** 4 of 9
-**Phase Name:** Classifier state + rules
-**Progress:** 33% (3/9 phases complete)
+**Current Phase:** 5 of 9
+**Phase Name:** Classifier transcript + prompt + decision
+**Progress:** 44% (4/9 phases complete)
 
 ---
 
 ## Progress Bar
 
 ```
-[###------] 33% (3/9)
+[####-----] 44% (4/9)
 ```
 
 ---
@@ -79,8 +79,8 @@
 | 1 | Scaffold + vendor bash + logging | `[Complete]` |
 | 2 | Bash deterministic layers + test corpus | `[Complete]` |
 | 3 | Orchestrator + Python skeleton | `[Complete]` |
-| 4 | Classifier state + rules | `[Current]` |
-| 5 | Classifier transcript + prompt + decision | `[Pending]` |
+| 4 | Classifier state + rules | `[Complete]` |
+| 5 | Classifier transcript + prompt + decision | `[Current]` |
 | 6 | Provider chain | `[Pending]` |
 | 7 | Classifier main + diag logging | `[Pending]` |
 | 8 | bin/aegis CLI + slash commands | `[Pending]` |
@@ -90,14 +90,14 @@
 
 ## Instructions for Agents
 
-1. Read `phase_plans/PHASE_04.md` for detailed requirements for Phase 4
-2. Read recent phase summaries (`summaries/PHASE_03_SUMMARY.md`, `summaries/PHASE_02_SUMMARY.md`) for context
+1. Read `phase_plans/PHASE_05.md` for detailed requirements for Phase 5
+2. Read recent phase summaries (`summaries/PHASE_04_SUMMARY.md`, `summaries/PHASE_03_SUMMARY.md`) for context
 3. Complete the phase following the build-verify-commit cycle
-4. Create `summaries/PHASE_04_SUMMARY.md`
+4. Create `summaries/PHASE_05_SUMMARY.md`
 5. Update this file:
-   - Mark Phase 4 as `[Complete]`
-   - Set Phase 5 as `[Current]`
-   - Update "Current Phase" to "5 of 9"
+   - Mark Phase 5 as `[Complete]`
+   - Set Phase 6 as `[Current]`
+   - Update "Current Phase" to "6 of 9"
    - Update "Progress" percentage and count
    - Update progress bar (each `#` = completed phase, each `-` = remaining phase)
 
