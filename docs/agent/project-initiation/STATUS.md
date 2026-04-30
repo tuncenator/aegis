@@ -50,7 +50,7 @@
 ### Conductor
 
 - **Total Batches**: 8
-- **Current Batch**: 7
+- **Current Batch**: 8
 - **Pacing**: auto-refresh
 - **Batches Per Session**: 4
 - **Execution Plan**: docs/agent/project-initiation/EXECUTION_PLAN.md
@@ -58,16 +58,16 @@
 ---
 
 **Last Updated:** 2026-04-30
-**Current Phase:** 8 of 9
-**Phase Name:** bin/aegis CLI + slash commands
-**Progress:** 78% (7/9 phases complete)
+**Current Phase:** 9 of 9
+**Phase Name:** install.sh + README + integration smoke
+**Progress:** 89% (8/9 phases complete)
 
 ---
 
 ## Progress Bar
 
 ```
-[#######--] 78% (7/9)
+[########-] 89% (8/9)
 ```
 
 ---
@@ -83,23 +83,22 @@
 | 5 | Classifier transcript + prompt + decision | `[Complete]` |
 | 6 | Provider chain | `[Complete]` |
 | 7 | Classifier main + diag logging | `[Complete]` |
-| 8 | bin/aegis CLI + slash commands | `[Current]` |
-| 9 | install.sh + README + integration smoke | `[Pending]` |
+| 8 | bin/aegis CLI + slash commands | `[Complete]` |
+| 9 | install.sh + README + integration smoke | `[Current]` |
 
 ---
 
 ## Instructions for Agents
 
-1. Read `phase_plans/PHASE_08.md` for detailed requirements for Phase 8
-2. Read recent phase summaries (`summaries/PHASE_07_SUMMARY.md`, `summaries/PHASE_06_SUMMARY.md`) for context
+1. Read `phase_plans/PHASE_09.md` for detailed requirements for Phase 9
+2. Read recent phase summaries (`summaries/PHASE_08_SUMMARY.md`, `summaries/PHASE_07_SUMMARY.md`) for context
 3. Complete the phase following the build-verify-commit cycle
-4. Create `summaries/PHASE_08_SUMMARY.md`
+4. Create `summaries/PHASE_09_SUMMARY.md`
 5. Update this file:
-   - Mark Phase 8 as `[Complete]`
-   - Set Phase 9 as `[Current]`
-   - Update "Current Phase" to "9 of 9"
-   - Update "Progress" percentage and count
-   - Update progress bar (each `#` = completed phase, each `-` = remaining phase)
+   - Mark Phase 9 as `[Complete]`
+   - Update "Current Phase" to "Complete"
+   - Update "Progress" to 100%
+   - Update progress bar (all `#`)
 
 **Phase plans:** See `phase_plans/PHASE_XX.md`
 **Project overview:** See `PROJECT_PLAN.md`
