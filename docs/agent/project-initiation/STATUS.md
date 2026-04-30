@@ -50,7 +50,7 @@
 ### Conductor
 
 - **Total Batches**: 8
-- **Current Batch**: 8
+- **Current Batch**: 8 (all done)
 - **Pacing**: auto-refresh
 - **Batches Per Session**: 4
 - **Execution Plan**: docs/agent/project-initiation/EXECUTION_PLAN.md
@@ -58,16 +58,16 @@
 ---
 
 **Last Updated:** 2026-04-30
-**Current Phase:** 9 of 9
-**Phase Name:** install.sh + README + integration smoke
-**Progress:** 89% (8/9 phases complete)
+**Current Phase:** Complete
+**Phase Name:** Complete
+**Progress:** 100% (9/9 phases complete)
 
 ---
 
 ## Progress Bar
 
 ```
-[########-] 89% (8/9)
+[#########] 100% (9/9)
 ```
 
 ---
@@ -84,24 +84,17 @@
 | 6 | Provider chain | `[Complete]` |
 | 7 | Classifier main + diag logging | `[Complete]` |
 | 8 | bin/aegis CLI + slash commands | `[Complete]` |
-| 9 | install.sh + README + integration smoke | `[Current]` |
+| 9 | install.sh + README + integration smoke | `[Complete]` |
 
 ---
 
 ## Instructions for Agents
 
-1. Read `phase_plans/PHASE_09.md` for detailed requirements for Phase 9
-2. Read recent phase summaries (`summaries/PHASE_08_SUMMARY.md`, `summaries/PHASE_07_SUMMARY.md`) for context
-3. Complete the phase following the build-verify-commit cycle
-4. Create `summaries/PHASE_09_SUMMARY.md`
-5. Update this file:
-   - Mark Phase 9 as `[Complete]`
-   - Update "Current Phase" to "Complete"
-   - Update "Progress" to 100%
-   - Update progress bar (all `#`)
+All 9 phases complete. Project is feature-complete for v1. No further phases.
 
 **Phase plans:** See `phase_plans/PHASE_XX.md`
 **Project overview:** See `PROJECT_PLAN.md`
+**Checkpoint summaries:** See `summaries/CHECKPOINT_*_SUMMARY.md`
 
 ---
 
