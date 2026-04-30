@@ -8,3 +8,8 @@ dependencies = ["loguru>=0.7"]
 [tool.pytest.ini_options]
 testpaths = ["tests/python"]
 pythonpath = ["."]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
