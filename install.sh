@@ -8,6 +8,31 @@ set -u
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Reconcile a symlink with the desired target.
+# Cases handled:
+#   - link missing                    -> create
+#   - link present, correct target    -> noop
+#   - link present, wrong/stale target -> remove and recreate
+#   - path exists as real file/dir     -> leave alone, warn
+ensure_symlink() {
+  local target="$1" link="$2" name="$3"
+  if [ -L "$link" ]; then
+    local current
+    current=$(readlink "$link")
+    if [ "$current" = "$target" ]; then
+      echo "$name already linked: $link -> $target"
+      return 0
+    fi
+    echo "Replacing stale $name link: $current -> $target"
+    rm "$link"
+  elif [ -e "$link" ]; then
+    echo "warning: $link exists and is not a symlink; leaving alone"
+    return 0
+  fi
+  ln -s "$target" "$link"
+  echo "Linked $name: $link -> $target"
+}
+
 # 1. Determine plugin install path. Prefer ~/Sync/.claude/plugins for synced setups.
 if [ -d "$HOME/Sync/.claude" ]; then
   PLUGIN_BASE="$HOME/Sync/.claude/plugins"
@@ -16,13 +41,8 @@ else
 fi
 mkdir -p "$PLUGIN_BASE"
 
-# 2. Copy or symlink the plugin tree.
-if [ -L "$PLUGIN_BASE/aegis" ] || [ -d "$PLUGIN_BASE/aegis" ]; then
-  echo "aegis plugin already installed at $PLUGIN_BASE/aegis"
-else
-  ln -s "$DIR" "$PLUGIN_BASE/aegis"
-  echo "Linked plugin: $PLUGIN_BASE/aegis -> $DIR"
-fi
+# 2. Symlink the plugin tree.
+ensure_symlink "$DIR" "$PLUGIN_BASE/aegis" "plugin"
 
 # 3. Vendor a fresh rule snapshot.
 if [ ! -s "$DIR/rules/snapshot.json" ]; then
@@ -32,10 +52,7 @@ fi
 
 # 4. Symlink the CLI into ~/.local/bin if that dir exists.
 if [ -d "$HOME/.local/bin" ]; then
-  if [ ! -L "$HOME/.local/bin/aegis" ]; then
-    ln -s "$DIR/bin/aegis" "$HOME/.local/bin/aegis"
-    echo "Linked CLI: $HOME/.local/bin/aegis -> $DIR/bin/aegis"
-  fi
+  ensure_symlink "$DIR/bin/aegis" "$HOME/.local/bin/aegis" "CLI"
 else
   echo "note: ~/.local/bin doesn't exist; add $DIR/bin to PATH yourself or 'mkdir ~/.local/bin && rerun'"
 fi
