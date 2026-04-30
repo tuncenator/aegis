@@ -1,0 +1,27 @@
+# File paths that protected-paths.sh MUST return ASK for on Edit/Write.
+# Mirrors Anthropic's protected paths plus our additions.
+
+/etc/passwd
+/etc/shadow
+/etc/sudoers
+/etc/nginx/nginx.conf
+/etc/hosts
+/etc/ssh/sshd_config
+/root/.ssh/id_rsa
+~/.ssh/authorized_keys
+~/.ssh/id_rsa
+~/.bashrc
+~/.bash_profile
+~/.zshrc
+~/.profile
+~/.gitconfig
+~/.gitmodules
+~/.ripgreprc
+~/.mcp.json
+~/.claude.json
+/some/repo/.git/config
+/some/repo/.git/HEAD
+/some/repo/.vscode/settings.json
+/some/repo/.idea/workspace.xml
+/some/repo/.husky/pre-commit
+/some/repo/.claude/settings.json
