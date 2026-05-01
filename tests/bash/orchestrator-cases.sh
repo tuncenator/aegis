@@ -33,11 +33,15 @@ assert() {
   fi
 }
 
-# Read-only tools always allow without classifier.
+# Read-only / harmless tools always allow without classifier.
 assert "Read tool"  '{"tool_name":"Read","tool_input":{"file_path":"/x"}}'  allow 0
 assert "Glob tool"  '{"tool_name":"Glob","tool_input":{"pattern":"*.py"}}'  allow 0
 assert "Grep tool"  '{"tool_name":"Grep","tool_input":{"pattern":"foo"}}'   allow 0
 assert "TodoWrite"  '{"tool_name":"TodoWrite","tool_input":{}}'              allow 0
+assert "Agent tool" '{"tool_name":"Agent","tool_input":{"description":"x","prompt":"y"}}' allow 0
+assert "Task tool"  '{"tool_name":"Task","tool_input":{"description":"x","prompt":"y"}}'  allow 0
+assert "WebFetch"   '{"tool_name":"WebFetch","tool_input":{"url":"https://example.com"}}'  allow 0
+assert "WebSearch"  '{"tool_name":"WebSearch","tool_input":{"query":"foo"}}'              allow 0
 
 # Bash safe command: gatekeeper allow.
 assert "ls"           '{"tool_name":"Bash","tool_input":{"command":"ls"}}'           allow 0

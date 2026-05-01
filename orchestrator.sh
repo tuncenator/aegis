@@ -12,8 +12,12 @@
 #   1. lib/protected-paths.sh    (ASK if matched, else silent fall-through)
 #   2. classifier (Python)
 #
-# Pipeline (Read-only tools: Read/Glob/Grep/TodoWrite/TaskCreate/etc.):
+# Pipeline (Harmless tools):
+#   Read/Glob/Grep/TodoWrite/TaskCreate/.../Agent/Task/WebFetch/WebSearch
 #   ALLOW immediately, no classifier.
+#   - Agent/Task (subagent dispatch): each subagent tool call comes back
+#     through this hook, so gating the dispatch adds noise without safety.
+#   - WebFetch/WebSearch: read-only network reads, no side effects.
 
 set -u
 
@@ -60,8 +64,11 @@ PY
 }
 
 # Read-only / harmless tools: allow without any classifier.
+# Agent/Task are subagent dispatchers; the subagent's individual tool calls
+# come back through this hook, so gating the dispatch itself adds noise without
+# safety. WebFetch/WebSearch are read-only network reads.
 case "$TOOL" in
-  Read|Glob|Grep|TodoWrite|TaskCreate|TaskUpdate|TaskList|TaskGet|TaskOutput|TaskStop)
+  Read|Glob|Grep|TodoWrite|TaskCreate|TaskUpdate|TaskList|TaskGet|TaskOutput|TaskStop|Agent|Task|WebFetch|WebSearch)
     diag_emit "read-only" "allow" "harmless tool" "$SESS" "$TOOL"
     emit_allow
     ;;
@@ -111,6 +118,6 @@ case "$TOOL" in
     ;;
 esac
 
-# All other tools (WebFetch, WebSearch, Agent, MCP tools, etc.): straight to classifier.
+# All other tools (MCP tools, etc.): straight to classifier.
 mock_classifier && exit 0
 echo "$INPUT" | exec env PYTHONPATH="$DIR" python3 -m classifier
