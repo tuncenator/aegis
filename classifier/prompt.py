@@ -57,6 +57,7 @@ def build_user_prompt(
     pending: dict[str, Any],
     claude_md: str | None,
     cfg: Config,
+    cwd: str | None = None,
 ) -> str:
     parts = ["Recent user messages (newest last):"]
     for m in parsed.user_messages:
@@ -74,8 +75,12 @@ def build_user_prompt(
 
     parts.append("")
     parts.append("PENDING ACTION:")
+    if cwd:
+        parts.append(f"  cwd: {cwd}")
     parts.append(f"  tool: {pending.get('tool_name', '?')}")
     parts.append(f"  input: {json.dumps(pending.get('tool_input', {}))}")
     parts.append("")
-    parts.append("Classify per the system prompt rules.")
+    parts.append("Classify per the system prompt rules. Relative paths in the")
+    parts.append("input resolve against cwd; treat them as in-project-scope")
+    parts.append("when they stay within the cwd subtree.")
     return "\n".join(parts)

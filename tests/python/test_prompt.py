@@ -54,6 +54,31 @@ def test_user_prompt_includes_claude_md_when_configured():
     assert "never push to main" in up
 
 
+def test_user_prompt_includes_cwd_when_provided():
+    parsed = ParsedTranscript()
+    up = prompt.build_user_prompt(
+        parsed,
+        {"tool_name": "Bash", "tool_input": {"command": "./node_modules/.bin/tsc --noEmit"}},
+        claude_md=None,
+        cfg=_cfg(),
+        cwd="/home/x/proj/frontend",
+    )
+    assert "/home/x/proj/frontend" in up
+    assert "cwd:" in up
+    assert "Relative paths" in up
+
+
+def test_user_prompt_omits_cwd_when_absent():
+    parsed = ParsedTranscript()
+    up = prompt.build_user_prompt(
+        parsed,
+        {"tool_name": "Bash", "tool_input": {"command": "ls"}},
+        claude_md=None,
+        cfg=_cfg(),
+    )
+    assert "cwd:" not in up
+
+
 def test_user_prompt_caps_claude_md():
     parsed = ParsedTranscript()
     cfg = _cfg()

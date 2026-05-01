@@ -66,7 +66,7 @@ def main() -> int:
     pending = {"tool_name": payload.get("tool_name"), "tool_input": payload.get("tool_input", {})}
 
     sys_p = prompt.build_system_prompt(snap, cfg)
-    usr_p = prompt.build_user_prompt(parsed, pending, _read_claude_md(cwd), cfg)
+    usr_p = prompt.build_user_prompt(parsed, pending, _read_claude_md(cwd), cfg, cwd=cwd)
 
     raw_response: str | None = None
     used_model: str | None = None
