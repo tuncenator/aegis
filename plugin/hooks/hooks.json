@@ -1,0 +1,13 @@
+{
+  "description": "Aegis PreToolUse pipeline: bash filters + LLM classifier",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/orchestrator.sh" }
+        ]
+      }
+    ]
+  }
+}

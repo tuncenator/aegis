@@ -24,7 +24,16 @@ cd aegis
 ./install.sh
 ```
 
-Then restart Claude Code so the plugin loads.
+`install.sh` symlinks the `aegis` CLI into `~/.local/bin` and writes a starter
+config at `~/.config/aegis/aegis.toml`. The plugin itself is loaded through a
+directory marketplace; register it once inside Claude Code:
+
+```
+/plugin marketplace add /absolute/path/to/aegis
+/plugin install aegis@aegis
+```
+
+Then restart Claude Code so the PreToolUse hook activates.
 
 ## Configuration
 

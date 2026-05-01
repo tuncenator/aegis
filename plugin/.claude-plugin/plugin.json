@@ -1,0 +1,5 @@
+{
+  "name": "aegis",
+  "version": "0.1.0",
+  "description": "LLM-classifier-driven permission mode for Claude Code"
+}

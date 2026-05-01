@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "aegis",
+  "version": "0.1.0",
+  "description": "Aegis local marketplace",
+  "owner": {
+    "name": "Tunç Yıldırım",
+    "email": "tunc@onlayer.com"
+  },
+  "plugins": [
+    {
+      "name": "aegis",
+      "source": "./plugin",
+      "description": "LLM-classifier-driven permission mode for Claude Code"
+    }
+  ]
+}

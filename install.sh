@@ -33,31 +33,31 @@ ensure_symlink() {
   echo "Linked $name: $link -> $target"
 }
 
-# 1. Determine plugin install path. Prefer ~/Sync/.claude/plugins for synced setups.
-if [ -d "$HOME/Sync/.claude" ]; then
-  PLUGIN_BASE="$HOME/Sync/.claude/plugins"
-else
-  PLUGIN_BASE="$HOME/.claude/plugins"
-fi
-mkdir -p "$PLUGIN_BASE"
+# 1. Clean up legacy plugin-tree symlinks. Earlier installs symlinked the repo
+# into ~/.claude/plugins/aegis or ~/Sync/.claude/plugins/aegis, but Claude Code
+# now discovers plugins only via marketplaces under .claude/plugins/marketplaces/.
+# The plugin is loaded through the directory marketplace registered below.
+for legacy in "$HOME/Sync/.claude/plugins/aegis" "$HOME/.claude/plugins/aegis"; do
+  if [ -L "$legacy" ]; then
+    echo "Removing legacy plugin symlink: $legacy"
+    rm "$legacy"
+  fi
+done
 
-# 2. Symlink the plugin tree.
-ensure_symlink "$DIR" "$PLUGIN_BASE/aegis" "plugin"
-
-# 3. Vendor a fresh rule snapshot.
+# 2. Vendor a fresh rule snapshot.
 if [ ! -s "$DIR/rules/snapshot.json" ]; then
   echo "Fetching initial rule snapshot..."
   "$DIR/bin/aegis" refresh-rules || echo "warning: refresh-rules failed; proceeding with empty snapshot"
 fi
 
-# 4. Symlink the CLI into ~/.local/bin if that dir exists.
+# 3. Symlink the CLI into ~/.local/bin if that dir exists.
 if [ -d "$HOME/.local/bin" ]; then
   ensure_symlink "$DIR/bin/aegis" "$HOME/.local/bin/aegis" "CLI"
 else
   echo "note: ~/.local/bin doesn't exist; add $DIR/bin to PATH yourself or 'mkdir ~/.local/bin && rerun'"
 fi
 
-# 5. Write a starter config if missing.
+# 4. Write a starter config if missing.
 CONFIG_DIR="$HOME/.config/aegis"
 if [ ! -f "$CONFIG_DIR/aegis.toml" ]; then
   mkdir -p "$CONFIG_DIR"
@@ -98,5 +98,10 @@ else
 fi
 
 echo
-echo "Aegis installed."
-echo "Restart Claude Code to load the plugin."
+echo "Aegis files installed."
+echo
+echo "Next, register the plugin with Claude Code (one-time):"
+echo "  /plugin marketplace add $DIR"
+echo "  /plugin install aegis@aegis"
+echo
+echo "Then restart Claude Code so the PreToolUse hook activates."
