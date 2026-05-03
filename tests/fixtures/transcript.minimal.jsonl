@@ -1,0 +1,4 @@
+{"type":"user","message":{"content":"hello"}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}
+{"type":"user","message":{"content":"run ls"}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"ls"}}]}}
