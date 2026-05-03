@@ -28,24 +28,10 @@ if [ -n "$_rm" ]; then
     fi
 fi
 
-# --- curl|wget piped to a shell ---
-# Classic untrusted remote execution. No legitimate in-workflow use.
-if echo "$CMD" | grep -qE '(curl|wget)[[:space:]][^|]*\|[[:space:]]*(sudo[[:space:]]+)?(sh|bash|zsh|ksh|dash)([[:space:]]|$)'; then
-    block "curl/wget piped directly to a shell"
-fi
-
-# --- AI attribution scrub ---
-# Belt-and-suspenders over the `attribution.commit/pr` setting. Rejects any
-# git commit / git tag -m / gh pr|issue create|edit that contains Claude
-# co-authorship trailers, the "Generated with Claude Code" tagline, or the
-# noreply@anthropic.com email. Scans the whole command string so heredoc
-# bodies ("git commit -F -" / "gh pr create --body-file -" patterns) are
-# covered too. --body-file <real-path> can't be scanned, not blocked here.
-_lower=$(echo "$CMD" | tr '[:upper:]' '[:lower:]')
-if echo "$_lower" | grep -qE '(^|[[:space:];|&()`])(git[[:space:]]+(commit|tag|merge)|gh[[:space:]]+(pr|issue)[[:space:]]+(create|edit|comment))'; then
-    if echo "$_lower" | grep -qE '(co-authored-by[[:space:]]*:[^\n]*claude|generated[[:space:]]+with[[:space:]]+\[?claude[[:space:]]+code|noreply@anthropic\.com|🤖[[:space:]]*generated[[:space:]]+with)'; then
-        block "AI attribution string in commit/PR message (Co-Authored-By / Generated with Claude Code / anthropic.com)"
-    fi
-fi
+# Note: curl|shell and AI-attribution scrub patterns moved to bash-hard-ask
+# (ASK with override). They are flag-worthy but not catastrophic; the user
+# should always have an override path for non-irreversible actions. Only
+# truly nuclear patterns (irreversible, no plausible legitimate use) remain
+# here as hard-deny.
 
 exit 0

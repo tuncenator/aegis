@@ -61,7 +61,11 @@ def test_main_falls_to_second_provider(monkeypatch, fake_stdin, capsys, mock_dia
     rc = main_mod.main()
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
-    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    # Classifier deny is downgraded to ask in the hook output (see
+    # decision.to_hook_output); only the deterministic bash-denylist
+    # layer can hard-block. The reason still rides through.
+    assert out["hookSpecificOutput"]["permissionDecision"] == "ask"
+    assert out["hookSpecificOutput"]["permissionDecisionReason"] == "r"
     assert len(calls) == 2
 
 

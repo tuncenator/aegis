@@ -27,9 +27,10 @@ def test_system_prompt_includes_rules_and_env():
     assert "ONLAYER" in sp
     assert "example.com" in sp
     assert "VICAR" in sp
-    assert "ALLOWED" in sp.upper()
-    assert "DENIED" in sp.upper()
+    assert "ALLOW" in sp.upper()
+    assert "DENY" in sp.upper()
     assert "ASK" in sp.upper()
+    assert "SOFT DENY" in sp.upper()
 
 
 def test_user_prompt_includes_context_and_pending():

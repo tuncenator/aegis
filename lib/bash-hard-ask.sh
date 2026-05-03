@@ -57,6 +57,23 @@ if echo "$CMD" | grep -qE '^[[:space:]]*ssh[[:space:]]+([a-zA-Z0-9._-]+@)?[a-zA-
   ask "ssh to production-named host"
 fi
 
+# curl/wget piped directly to a shell.
+# Classic untrusted remote execution; user gets the override path.
+if echo "$CMD" | grep -qE '(curl|wget)[[:space:]][^|]*\|[[:space:]]*(sudo[[:space:]]+)?(sh|bash|zsh|ksh|dash)([[:space:]]|$)'; then
+  ask "curl/wget piped directly to a shell"
+fi
+
+# AI attribution scrub on git commit / git tag / git merge / gh pr|issue
+# create|edit|comment commands. Catches Claude co-authorship trailers,
+# the "Generated with Claude Code" tagline, and noreply@anthropic.com.
+# Scans the whole command string so heredoc and -F - bodies are covered.
+_lower=$(echo "$CMD" | tr '[:upper:]' '[:lower:]')
+if echo "$_lower" | grep -qE '(^|[[:space:];|&()`])(git[[:space:]]+(commit|tag|merge)|gh[[:space:]]+(pr|issue)[[:space:]]+(create|edit|comment))'; then
+  if echo "$_lower" | grep -qE '(co-authored-by[[:space:]]*:[^\n]*claude|generated[[:space:]]+with[[:space:]]+\[?claude[[:space:]]+code|noreply@anthropic\.com|🤖[[:space:]]*generated[[:space:]]+with)'; then
+    ask "AI attribution string in commit/PR message"
+  fi
+fi
+
 # Project-level patterns from .aegis/hard-ask.toml
 if [ -n "$CWD" ] && [ -f "$CWD/.aegis/hard-ask.toml" ]; then
   while IFS= read -r pat; do

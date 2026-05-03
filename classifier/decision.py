@@ -45,12 +45,23 @@ def parse_response(text: str) -> Decision:
 
 
 def to_hook_output(d: Decision) -> str:
+    """Convert a classifier Decision to a Claude Code hook payload.
+
+    Classifier-emitted DENY is downgraded to ASK so the user always has
+    an override path; the classifier's reason is surfaced as the ASK
+    prompt text. The only hard-block channel is the deterministic
+    bash-denylist layer, which exits the orchestrator with rc=2 before
+    this function runs. State counters and the diagnostic log still see
+    the classifier's original verdict, so deny-storms can still auto-
+    pause the session even though each individual ASK is overridable.
+    """
+    surfaced = "ask" if d.decision == "deny" else d.decision
     payload = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "permissionDecision": d.decision,
+            "permissionDecision": surfaced,
         }
     }
-    if d.decision == "deny" and d.reason:
+    if surfaced in ("ask", "deny") and d.reason:
         payload["hookSpecificOutput"]["permissionDecisionReason"] = d.reason
     return json.dumps(payload)
