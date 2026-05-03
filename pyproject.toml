@@ -1,6 +1,6 @@
 [project]
 name = "aegis-classifier"
-version = "0.1.0"
+version = "1.0.0"
 description = "Aegis LLM classifier - slow path for permission decisions"
 requires-python = ">=3.11"
 dependencies = ["loguru>=0.7"]

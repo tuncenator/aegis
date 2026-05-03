@@ -4,3 +4,6 @@ __pycache__/
 .aegis-cache/
 *.swp
 .DS_Store
+
+# Project-local Claude Code state (per-user hooks, ephemeral worktrees)
+.claude/
