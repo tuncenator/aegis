@@ -56,9 +56,9 @@ class Config:
 
 
 _DEFAULT_CHAIN = [
-    ProviderSpec("gemini", "gemini-3.1-flash-lite-preview", retries=2, timeout_s=8),
-    ProviderSpec("gemini", "gemini-3-flash-preview", retries=1, timeout_s=8),
-    ProviderSpec("claude", "claude-haiku-4-5", retries=1, timeout_s=8),
+    ProviderSpec("gemini", "gemini-3.1-flash-lite-preview", retries=2, timeout_s=15),
+    ProviderSpec("gemini", "gemini-3-flash-preview", retries=1, timeout_s=15),
+    ProviderSpec("claude", "claude-haiku-4-5", retries=1, timeout_s=12),
 ]
 
 
