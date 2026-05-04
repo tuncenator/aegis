@@ -19,7 +19,8 @@ def call(spec: ProviderSpec, system: str, user: str) -> str | None:
 
     def invoke():
         return subprocess.run(
-            ["claude", "--model", spec.model, "-p", prompt],
+            ["claude", "--model", spec.model, "-p", "-"],
+            input=prompt,
             capture_output=True, text=True, timeout=spec.timeout_s, env=env,
         )
 

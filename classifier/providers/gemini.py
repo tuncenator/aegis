@@ -13,7 +13,8 @@ def call(spec: ProviderSpec, system: str, user: str) -> str | None:
 
     def invoke():
         return subprocess.run(
-            ["gemini", "-m", spec.model, "-p", prompt],
+            ["gemini", "-m", spec.model],
+            input=prompt,
             capture_output=True, text=True, timeout=spec.timeout_s,
             env=os.environ.copy(),
         )
