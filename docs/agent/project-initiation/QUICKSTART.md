@@ -429,11 +429,11 @@ Each phase is designed to fit within one agent session. If you run out of contex
 
 - Do NOT hardcode credentials in source code, config files, documentation, or agent framework files
 - The starter `~/.config/aegis/aegis.toml` written by `install.sh` includes the user's trusted orgs/services (`ONLAYER`, `Onlayer`, `onlayer.com`, etc.) -- those are not secrets, they are environment hints for the classifier prompt. Still avoid duplicating them into committed code.
-- A pre-commit hook is active on this repository to catch accidental credential leaks and to redact `[LABEL]` markers in agent docs
+- A pre-commit hook is active on this repository to catch accidental credential leaks and to redact `<{LABEL:value}>` markers in agent docs
 
 #### Pre-commit hook block: bypass procedure
 
-Most blocks are real. The hook redacts `[LABEL]` markers and matches secret-shaped patterns. False positives happen but are not the common case.
+Most blocks are real. The hook redacts `<{LABEL:value}>` markers and matches secret-shaped patterns. False positives happen but are not the common case.
 
 **Do NOT bypass with `git commit --no-verify` if any of these are true:**
 
@@ -447,7 +447,7 @@ If any of the above hold, stop. End your phase with a line naming the blocked fi
 
 1. Print to your output:
    - **Path**: full path of the blocked file (relative to project root)
-   - **Matched pattern**: the value the hook flagged, redacted to `[LABEL]` form (replace any actual token tail with `***` if you cannot tag it)
+   - **Matched pattern**: the value the hook flagged, redacted to `<{LABEL:value}>` form (replace any actual token tail with `***` if you cannot tag it)
    - **Reason it is not a real secret**: one sentence (e.g. "test fixture string in `tests/fixtures/sample-jwt.json`, not used at runtime")
 2. Add a `Bypass-reason:` trailer to the commit message body using `git commit --no-verify -m "..." -m "Bypass-reason: <one-line reason>"`. The trailer is what `/spark-status` will count when surfacing bypass usage; commits without the trailer are flagged as unaudited.
 3. Commit. The bypass and reason are now in git history for review.
@@ -459,12 +459,12 @@ If you bypass without the trailer, the next reviewer (and `/spark-status`) will 
 When you need to reference infrastructure-specific values (hostnames, IP addresses, server paths, database names, ports) in agent framework documentation files under `docs/agent/`, use inline tags:
 
 ```
-[LABEL]
+<{LABEL:actual_value}>
 ```
 
 For Aegis, this rarely applies because the project deals with local-only paths and well-known shell commands. The relevant cases are:
-- The user's home path (`/home/tunc`) when documenting state file locations -- use `[HOME]` if you need to be explicit, otherwise just write `~`
-- Trusted-environment values from `~/.config/aegis/aegis.toml` if you ever copy them into a doc -- use `[TRUSTED_ORG]` etc. (these are not secrets but they identify the user, so apply the redaction discipline)
+- The user's home path (`/home/tunc`) when documenting state file locations -- use `<{HOME:/home/tunc}>` if you need to be explicit, otherwise just write `~`
+- Trusted-environment values from `~/.config/aegis/aegis.toml` if you ever copy them into a doc -- use `<{TRUSTED_ORG:ONLAYER}>` etc. (these are not secrets but they identify the user, so apply the redaction discipline)
 
 You always see the real values in your local working copy. Only the committed version is redacted.
 
@@ -518,7 +518,7 @@ During your work:
 - [ ] Activate environment before running commands (see Environment Setup section)
 - [ ] Build incrementally -- verify each chunk before moving on
 - [ ] Check stderr / decisions.jsonl after running code
-- [ ] Use `[LABEL]` for sensitive values in doc files
+- [ ] Use `<{LABEL:value}>` for sensitive values in doc files
 - [ ] Commit after each verified chunk (multiple commits per phase is fine)
 - [ ] Write tests if required (TDD pattern: red, green, refactor)
 

@@ -65,6 +65,26 @@ through a directory marketplace; register it once inside Claude Code:
 Then `/reload-plugins` (or restart Claude Code) so the PreToolUse hook
 activates. Verify with `/aegis-status`.
 
+## Provider Authentication
+
+The default classifier chain uses Gemini as the primary provider. Claude Code
+hooks run as non-interactive subprocesses that do **not** inherit your shell
+profile env vars (`.bashrc`, `.zshrc`). This means `GEMINI_API_KEY` set in your
+shell won't reach the classifier, causing silent failures and chain exhaustion.
+
+**Gemini** (primary): place your API key in `~/.gemini/.env`:
+```
+GEMINI_API_KEY=<your-key>
+```
+The Gemini CLI loads this file internally before checking env vars, so it works
+regardless of the parent process environment. `install.sh` handles this
+automatically if `GEMINI_API_KEY` is in your environment when you run it.
+
+**Claude Haiku** (fallback): authenticates through the existing Claude CLI
+login (OAuth/session), not an env var. No extra setup needed. Note that the
+default 8s timeout may be too short on some systems (e.g., Termux with proot);
+increase `timeout_s` in `aegis.toml` if Haiku times out as fallback.
+
 ## Configuration
 
 Global config: `~/.config/aegis/aegis.toml`

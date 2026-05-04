@@ -24,6 +24,11 @@ set -u
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB="$DIR/lib"
 
+# Termux: prefer the project's uv-managed venv for python3 invocations below.
+if [ -x "$DIR/.venv/bin/python" ]; then
+  export PATH="$DIR/.venv/bin:$PATH"
+fi
+
 # Test-mode shortcut: when AEGIS_TEST_MOCK_DECISION is set, return that decision.
 mock_classifier() {
   case "${AEGIS_TEST_MOCK_DECISION:-}" in
