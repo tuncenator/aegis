@@ -44,20 +44,45 @@ for legacy in "$HOME/Sync/.claude/plugins/aegis" "$HOME/.claude/plugins/aegis"; 
   fi
 done
 
-# 2. Vendor a fresh rule snapshot.
+# 2. Ensure Gemini API key is accessible to non-interactive subprocesses.
+# Claude Code hooks don't inherit shell profile env vars (.bashrc/.zshrc),
+# so GEMINI_API_KEY set there won't reach the classifier. The Gemini CLI
+# loads ~/.gemini/.env before checking the env var, making it the reliable
+# place for subprocess use.
+GEMINI_ENV="$HOME/.gemini/.env"
+if [ -n "${GEMINI_API_KEY:-}" ]; then
+  if [ ! -f "$GEMINI_ENV" ] || ! grep -q "GEMINI_API_KEY" "$GEMINI_ENV" 2>/dev/null; then
+    mkdir -p "$HOME/.gemini"
+    echo "GEMINI_API_KEY=$GEMINI_API_KEY" >> "$GEMINI_ENV"
+    echo "Wrote GEMINI_API_KEY to $GEMINI_ENV (for non-interactive subprocess access)"
+  else
+    echo "Gemini API key already in $GEMINI_ENV"
+  fi
+elif [ -f "$GEMINI_ENV" ] && grep -q "GEMINI_API_KEY" "$GEMINI_ENV" 2>/dev/null; then
+  echo "Gemini API key found in $GEMINI_ENV"
+else
+  echo "warning: GEMINI_API_KEY not found in environment or $GEMINI_ENV"
+  echo "  The default classifier chain uses Gemini as the primary provider."
+  echo "  Without the key, Gemini calls will fail and the chain will fall through"
+  echo "  to slower providers or exhaust entirely."
+  echo "  Fix: export GEMINI_API_KEY=<key> and rerun, or add it to $GEMINI_ENV:"
+  echo "    echo 'GEMINI_API_KEY=<key>' >> $GEMINI_ENV"
+fi
+
+# 3. Vendor a fresh rule snapshot.
 if [ ! -s "$DIR/rules/snapshot.json" ]; then
   echo "Fetching initial rule snapshot..."
   "$DIR/bin/aegis" refresh-rules || echo "warning: refresh-rules failed; proceeding with empty snapshot"
 fi
 
-# 3. Symlink the CLI into ~/.local/bin if that dir exists.
+# 4. Symlink the CLI into ~/.local/bin if that dir exists.
 if [ -d "$HOME/.local/bin" ]; then
   ensure_symlink "$DIR/bin/aegis" "$HOME/.local/bin/aegis" "CLI"
 else
   echo "note: ~/.local/bin doesn't exist; add $DIR/bin to PATH yourself or 'mkdir ~/.local/bin && rerun'"
 fi
 
-# 4. Write a starter config if missing.
+# 5. Write a starter config if missing.
 CONFIG_DIR="$HOME/.config/aegis"
 if [ ! -f "$CONFIG_DIR/aegis.toml" ]; then
   mkdir -p "$CONFIG_DIR"
@@ -83,10 +108,10 @@ include_claude_md = true
 claude_md_max_tokens = 4000
 
 [environment]
-trusted_orgs    = ["ONLAYER", "Onlayer"]
-trusted_domains = ["onlayer.com", "*.onlayer.com", "atlassian.net", "hubapi.com"]
+trusted_orgs    = []
+trusted_domains = []
 trusted_buckets = []
-trusted_services = ["FGT_001_CLAUDE", "VICAR", "STORMTREE", "CORPSEFIRE"]
+trusted_services = []
 
 [logging]
 diag_path = "~/.cache/aegis/decisions.jsonl"
