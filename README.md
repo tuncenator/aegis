@@ -65,6 +65,26 @@ through a directory marketplace; register it once inside Claude Code:
 Then `/reload-plugins` (or restart Claude Code) so the PreToolUse hook
 activates. Verify with `/aegis-status`.
 
+### `Bash` allow rule
+
+`install.sh` offers (interactive, default no) to add `"Bash"` to
+`permissions.allow` in `~/.claude/settings.json`. This is **load-bearing**:
+without it, Claude Code's default-mode prompt fires for every Bash command
+not in its built-in safe list, regardless of what the aegis hook returns
+(per the [hooks docs](https://code.claude.com/docs/en/hooks-guide):
+*"Returning 'allow' skips the interactive prompt but does not override
+permission rules. ... If an ask rule matches, the user is still prompted."*).
+The documented pattern is to allow `Bash` outright and let the hook
+deny/ask the things that need attention.
+
+Risk: if aegis is disabled or fails to load, the rule still applies, so
+Bash commands run without prompts. Skip the prompt during install (or
+unset by removing the entry) if you want Claude Code's stock prompt as a
+backstop.
+
+Non-interactive installs: set `AEGIS_INSTALL_BASH_ALLOW=1` to apply
+without prompting, or `=0` to skip.
+
 ## Provider Authentication
 
 The default classifier chain uses Gemini as the primary provider. Claude Code

@@ -122,6 +122,87 @@ else
   echo "Config already present: $CONFIG_DIR/aegis.toml"
 fi
 
+# 6. Optional: add "Bash" to permissions.allow in user settings.
+# Required for aegis to fully drive Bash gating. Without it, Claude Code's
+# default-mode prompt fires for any Bash command not in its built-in safe
+# list, regardless of what the hook returns -- per the docs at
+# https://code.claude.com/docs/en/hooks-guide:
+#   "Returning 'allow' skips the interactive prompt but does not override
+#    permission rules. ... If an ask rule matches, the user is still prompted."
+# Documented workaround at https://code.claude.com/docs/en/permissions:
+#   "To run all Bash commands without prompts except for a few you want
+#    blocked, add 'Bash' to your allow list and register a PreToolUse hook
+#    that rejects those specific commands."
+SETTINGS="$HOME/.claude/settings.json"
+
+cat <<'WARN'
+
+----------------------------------------------------------------------
+Optional: add "Bash" to permissions.allow in ~/.claude/settings.json
+----------------------------------------------------------------------
+
+WHY: Claude Code's default mode prompts for any Bash command not in its
+built-in safe list. A PreToolUse hook returning "allow" does NOT
+override that prompt (per Claude Code docs). The documented pattern is
+to add "Bash" to permissions.allow and let the hook handle deny/ask.
+
+EFFECT: aegis becomes the sole gatekeeper for Bash:
+  - aegis allow  -> command runs silently
+  - aegis ask    -> Claude Code prompts with aegis's reason
+  - aegis deny   -> surfaced as ask with reason (override path preserved)
+  - bash-denylist (exit 2) -> hard block regardless
+
+RISK: if aegis is disabled (/aegis off), uninstalled, or the hook fails
+to load, this rule still applies, so Bash commands run WITHOUT prompts.
+To revert: remove "Bash" from permissions.allow in the settings file.
+----------------------------------------------------------------------
+
+WARN
+
+skip_allow_rule() {
+  echo "Skipped. To add later, run:"
+  echo "  jq '.permissions.allow = ((.permissions.allow // []) + [\"Bash\"])' \"$SETTINGS\" > /tmp/aegis-settings.json && mv /tmp/aegis-settings.json \"$SETTINGS\""
+}
+
+apply_allow_rule() {
+  local tmp
+  if [ ! -f "$SETTINGS" ]; then
+    mkdir -p "$(dirname "$SETTINGS")"
+    echo '{"permissions":{"allow":["Bash"]}}' | jq . > "$SETTINGS"
+    echo "Created $SETTINGS with Bash allow rule"
+    return 0
+  fi
+  if jq -e '(.permissions.allow // []) | index("Bash")' "$SETTINGS" >/dev/null 2>&1; then
+    echo "'Bash' already in permissions.allow in $SETTINGS"
+    return 0
+  fi
+  tmp=$(mktemp)
+  if ! jq '.permissions.allow = ((.permissions.allow // []) + ["Bash"])' "$SETTINGS" > "$tmp"; then
+    echo "warning: failed to update $SETTINGS (malformed JSON?)"
+    rm -f "$tmp"
+    return 1
+  fi
+  mv "$tmp" "$SETTINGS"
+  echo "Added 'Bash' to permissions.allow in $SETTINGS"
+}
+
+if [ "${AEGIS_INSTALL_BASH_ALLOW:-}" = "0" ]; then
+  echo "AEGIS_INSTALL_BASH_ALLOW=0 -- not modifying $SETTINGS."
+  skip_allow_rule
+elif [ "${AEGIS_INSTALL_BASH_ALLOW:-}" = "1" ]; then
+  echo "AEGIS_INSTALL_BASH_ALLOW=1 -- applying rule without prompting."
+  apply_allow_rule || true
+elif [ -t 0 ]; then
+  read -r -p "Add 'Bash' to permissions.allow now? [y/N] " reply
+  case "$reply" in
+    y|Y|yes|YES) apply_allow_rule || true ;;
+    *) skip_allow_rule ;;
+  esac
+else
+  echo "Non-interactive install (no TTY) -- not modifying $SETTINGS."
+  skip_allow_rule
+fi
+
 echo
 echo "Aegis files installed."
 echo
