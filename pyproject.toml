@@ -3,7 +3,10 @@ name = "aegis-classifier"
 version = "1.0.0"
 description = "Aegis LLM classifier - slow path for permission decisions"
 requires-python = ">=3.11"
-dependencies = ["loguru>=0.7"]
+dependencies = [
+    "google-genai>=2.0.0",
+    "loguru>=0.7",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/python"]

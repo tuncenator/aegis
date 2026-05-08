@@ -1,43 +1,75 @@
-"""Gemini CLI provider: subprocess call to `gemini -m MODEL -p PROMPT`."""
+"""Gemini provider via google-genai SDK.
+
+Direct API call (no CLI subprocess), so we avoid the gemini CLI's agentic
+loop, tool detection, and Node startup overhead. Empirical p99 with 17k
+prompts: ~0.9s vs CLI's 15-17s.
+
+Auth: GEMINI_API_KEY (or GOOGLE_API_KEY) from env, with fallback to
+~/.gemini/.env where the gemini CLI stores its key.
+"""
 from __future__ import annotations
 
 import os
-import signal
-import subprocess
+from pathlib import Path
 
-from classifier.providers.base import run_with_retry
+from google import genai
+from google.genai import errors as genai_errors
+from google.genai import types
+
+from classifier.providers.base import _log_error
 from classifier.rules import ProviderSpec
 
+_DOTENV = Path.home() / ".gemini" / ".env"
 
-def _run_gemini(args: list[str], input_text: str, timeout: int, env: dict) -> subprocess.CompletedProcess:
-    """Run gemini CLI in its own process group so we can kill it cleanly on timeout."""
-    proc = subprocess.Popen(
-        args,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env=env,
-        start_new_session=True,
-    )
-    try:
-        stdout, stderr = proc.communicate(input=input_text, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        os.killpg(proc.pid, signal.SIGKILL)
-        proc.wait(timeout=5)
-        raise
-    return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
+
+def _resolve_api_key() -> str | None:
+    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if key:
+        return key
+    if _DOTENV.exists():
+        try:
+            for line in _DOTENV.read_text().splitlines():
+                line = line.strip()
+                if line.startswith("GEMINI_API_KEY="):
+                    return line.split("=", 1)[1].strip().strip('"').strip("'")
+        except OSError:
+            return None
+    return None
 
 
 def call(spec: ProviderSpec, system: str, user: str) -> str | None:
-    prompt = f"{system}\n\n---\n\n{user}"
+    key = _resolve_api_key()
+    if not key:
+        _log_error(spec.provider, spec.model, 1, "no GEMINI_API_KEY available")
+        return None
 
-    def invoke():
-        return _run_gemini(
-            ["gemini", "-m", spec.model],
-            input_text=prompt,
-            timeout=spec.timeout_s,
-            env=os.environ.copy(),
-        )
+    client = genai.Client(
+        api_key=key,
+        http_options=types.HttpOptions(timeout=spec.timeout_s * 1000),
+    )
+    cfg = types.GenerateContentConfig(
+        system_instruction=system,
+        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL),
+        temperature=0.0,
+    )
 
-    return run_with_retry(spec, invoke)
+    for attempt in range(max(1, spec.retries)):
+        try:
+            resp = client.models.generate_content(
+                model=spec.model,
+                contents=user,
+                config=cfg,
+            )
+        except genai_errors.APIError as e:
+            _log_error(spec.provider, spec.model, attempt + 1, f"api_error: {e}")
+            continue
+        except (TimeoutError, ConnectionError) as e:
+            _log_error(spec.provider, spec.model, attempt + 1, f"{type(e).__name__}: {e}")
+            continue
+
+        text = (resp.text or "").strip()
+        if not text:
+            _log_error(spec.provider, spec.model, attempt + 1, "empty response")
+            continue
+        return text
+    return None
