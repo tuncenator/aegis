@@ -2,7 +2,8 @@
 description: Re-enable Aegis classifier for the current session
 ---
 
-Run the Aegis CLI to re-enable Aegis for this session. The session_id is provided
-by Claude Code in the slash command context.
+Run this command using the Bash tool (replace $CLAUDE_SESSION_ID with the actual session ID from context):
 
-!`bin/aegis on --session "$CLAUDE_SESSION_ID"`
+```bash
+bin/aegis on --session "$CLAUDE_SESSION_ID"
+```

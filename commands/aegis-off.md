@@ -2,6 +2,8 @@
 description: Disable Aegis classifier for the current session (decisions revert to manual prompt)
 ---
 
-Run the Aegis CLI to disable Aegis for this session.
+Run this command using the Bash tool (replace $CLAUDE_SESSION_ID with the actual session ID from context):
 
-!`bin/aegis off --session "$CLAUDE_SESSION_ID"`
+```bash
+bin/aegis off --session "$CLAUDE_SESSION_ID"
+```

@@ -2,6 +2,8 @@
 description: Show Aegis state for the current session
 ---
 
-Run the Aegis CLI to show current session state.
+Run this command using the Bash tool (replace $CLAUDE_SESSION_ID with the actual session ID from context):
 
-!`bin/aegis status --session "$CLAUDE_SESSION_ID"`
+```bash
+bin/aegis status --session "$CLAUDE_SESSION_ID"
+```
