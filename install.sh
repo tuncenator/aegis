@@ -89,9 +89,9 @@ if [ ! -f "$CONFIG_DIR/aegis.toml" ]; then
   cat > "$CONFIG_DIR/aegis.toml" << 'EOF'
 [classifier]
 chain = [
-  { provider = "gemini", model = "gemini-3.1-flash-lite-preview", retries = 2, timeout_s = 8 },
-  { provider = "gemini", model = "gemini-3-flash-preview",        retries = 1, timeout_s = 8 },
-  { provider = "claude", model = "claude-haiku-4-5",              retries = 1, timeout_s = 8 },
+  { provider = "gemini", model = "gemini-3.1-flash-lite-preview", retries = 2, timeout_s = 15 },
+  { provider = "gemini", model = "gemini-3-flash-preview",        retries = 1, timeout_s = 15 },
+  { provider = "claude", model = "claude-haiku-4-5",              retries = 1, timeout_s = 12 },
 ]
 on_exhaustion = "ask"
 
