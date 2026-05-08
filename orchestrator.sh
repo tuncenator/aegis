@@ -21,10 +21,14 @@
 
 set -u
 
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve symlinks so the plugin path (~/.../plugin/orchestrator.sh) finds
+# the real aegis root and its .venv. readlink -f follows the chain.
+SRC="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+DIR="$(cd "$(dirname "$SRC")" && pwd)"
 LIB="$DIR/lib"
 
-# Termux: prefer the project's uv-managed venv for python3 invocations below.
+# Prefer the project's uv-managed venv so the classifier sees google-genai
+# and other Python deps.
 if [ -x "$DIR/.venv/bin/python" ]; then
   export PATH="$DIR/.venv/bin:$PATH"
 fi
