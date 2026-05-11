@@ -78,7 +78,7 @@ def _merge_chain(raw: list[dict]) -> list[ProviderSpec]:
             provider=entry["provider"],
             model=entry["model"],
             retries=entry.get("retries", 1),
-            timeout_s=entry.get("timeout_s", 8),
+            timeout_s=entry.get("timeout_s", 15),
         ))
     return out
 

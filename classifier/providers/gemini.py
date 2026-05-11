@@ -43,9 +43,10 @@ def call(spec: ProviderSpec, system: str, user: str) -> str | None:
         _log_error(spec.provider, spec.model, 1, "no GEMINI_API_KEY available")
         return None
 
+    timeout_ms = max(10, spec.timeout_s) * 1000
     client = genai.Client(
         api_key=key,
-        http_options=types.HttpOptions(timeout=spec.timeout_s * 1000),
+        http_options=types.HttpOptions(timeout=timeout_ms),
     )
     cfg = types.GenerateContentConfig(
         system_instruction=system,
