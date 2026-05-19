@@ -1,0 +1,11 @@
+{"type":"user","message":{"content":"do the visual work"}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu_1","name":"mcp__playwright__browser_navigate","input":{"url":"http://127.0.0.1:3000"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_1","content":"page loaded"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu_2","name":"mcp__playwright__browser_click","input":{"selector":"button.theme"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_2","content":"clicked"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu_3","name":"mcp__playwright__browser_click","input":{"selector":"button.nav"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_3","is_error":true,"content":"Permission denied by user"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu_4","name":"Bash","input":{"command":"git status"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_4","content":"On branch foo"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu_5","name":"Bash","input":{"command":"git status --short"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_5","content":""}]}}
