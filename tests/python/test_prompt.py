@@ -2,7 +2,7 @@ import pytest
 
 from classifier import prompt
 from classifier.rules import Config, Snapshot
-from classifier.transcript import ParsedTranscript, ToolUse
+from classifier.transcript import ParsedTranscript, PriorApproval, ToolUse
 
 
 def _cfg():
@@ -78,6 +78,46 @@ def test_user_prompt_omits_cwd_when_absent():
         cfg=_cfg(),
     )
     assert "cwd:" not in up
+
+
+def test_system_prompt_mentions_prior_approval_recall():
+    sp = prompt.build_system_prompt(_snap(), _cfg())
+    assert "PRIOR-APPROVAL RECALL" in sp
+    assert "LEAN ALLOW" in sp
+
+
+def test_system_prompt_biases_ask_over_deny_on_pattern_match():
+    sp = prompt.build_system_prompt(_snap(), _cfg())
+    assert "When in doubt between DENY and ASK, choose ASK." in sp
+    assert "substring" in sp
+
+
+def test_user_prompt_lists_prior_approvals_when_present():
+    parsed = ParsedTranscript(
+        user_messages=["go"],
+        tool_uses=[],
+        prior_approvals=[
+            PriorApproval(tool="mcp__playwright__browser_click", signature="browser", count=4),
+            PriorApproval(tool="Bash", signature="git status", count=2),
+        ],
+    )
+    up = prompt.build_user_prompt(
+        parsed, {"tool_name": "mcp__playwright__browser_click", "tool_input": {}},
+        claude_md=None, cfg=_cfg(),
+    )
+    assert "User-approved patterns this session" in up
+    assert "browser_click" in up
+    assert "count=4" in up
+    assert "count=2" in up
+
+
+def test_user_prompt_omits_approval_section_when_empty():
+    parsed = ParsedTranscript(user_messages=["go"], tool_uses=[], prior_approvals=[])
+    up = prompt.build_user_prompt(
+        parsed, {"tool_name": "Bash", "tool_input": {"command": "ls"}},
+        claude_md=None, cfg=_cfg(),
+    )
+    assert "User-approved patterns this session" not in up
 
 
 def test_user_prompt_caps_claude_md():
