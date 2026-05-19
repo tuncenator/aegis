@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.1.0 -- 2026-05-20
+
+Adds session memory to the classifier. Aegis used to relitigate every
+tool call from scratch -- a tool the user approved 20 times could still
+get ASKed on call 21, and the model would sometimes invent a deny
+rationale on the second call that contradicted the first call's allow.
+This release closes that loop and tightens the model's deny discretion.
+
+### Behavior
+
+- **Prior-approval recall.** The classifier now reads the active
+  transcript and tallies, per (tool, coarse signature), the tool_uses
+  that already ran in this session without a denial marker. The user
+  prompt grows a "User-approved patterns this session" block listing
+  the matches; the system prompt grows a PRIOR-APPROVAL RECALL paragraph
+  telling the model to LEAN ALLOW when the pending call matches one of
+  those patterns. Hard-deny categories still bite regardless of history.
+  Signature is family-specific: Playwright collapses to `browser`, Bash
+  takes its first two tokens, Edit/Write keys on parent dir + extension,
+  other MCP tools collapse to `mcp`. Tool_result bodies are never
+  propagated to the prompt (only is_error and a small set of denial
+  markers), so the prompt injection surface stays zero.
+- **ASK over speculative DENY.** The DENY section of the system prompt
+  now explicitly says: use DENY only when the action category itself
+  clearly applies to a listed bullet (force push, prod ssh, curl|sh,
+  mass deletion, etc.). When suspicion comes from substring
+  pattern-matching on a payload-looking value -- a `javascript:` in a
+  query parameter, a script-tag-shaped string, an unusual flag -- choose
+  ASK instead. The classifier's deny is downgraded to ASK at the hook
+  boundary anyway, but the ASK prompt body comes from the model's
+  reason text, so framing the model toward ASK produces a more neutral
+  prompt the user can actually evaluate.
+
+### Verification
+
+Live measurement against a production conductor session: 10 classifier
+denies in 3.5 hours before this branch (9 spurious Playwright "Spark
+Conductor shouldn't drive UI" rationale on subagent calls that
+legitimately needed Playwright, plus one ambiguous HTTP DELETE), versus
+1 deny in the 43 minutes after switching to this branch -- and that one
+was a `javascript:alert(1)` substring fired by a spark-tester running an
+adversarial Tab URL Injection scenario.
+
 ## 1.0.0 -- 2026-05-04
 
 First production release. Aegis now matches Anthropic's auto-mode
