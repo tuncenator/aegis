@@ -9,7 +9,8 @@ from classifier import rules
 
 @pytest.fixture
 def tmp_repo(tmp_path, monkeypatch):
-    snap = {"allow": ["A1", "A2"], "soft_deny": ["D1"], "environment": []}
+    snap = {"allow": ["A1", "A2"], "soft_deny": ["D1"], "environment": ["E1"],
+            "hard_deny": ["H1"]}
     (tmp_path / "snapshot.json").write_text(json.dumps(snap))
     (tmp_path / "snapshot.meta.json").write_text(json.dumps({
         "fetched_at": "2026-04-30T00:00:00Z",
@@ -25,6 +26,22 @@ def test_load_snapshot(tmp_repo):
     snap = rules.load_snapshot()
     assert "A1" in snap.allow
     assert "D1" in snap.soft_deny
+    assert "E1" in snap.environment
+    assert "H1" in snap.hard_deny
+
+
+def test_load_snapshot_without_hard_deny_defaults_empty(tmp_path, monkeypatch):
+    """Older snapshots predate the hard_deny section."""
+    p = tmp_path / "snapshot.json"
+    p.write_text(json.dumps({"allow": [], "soft_deny": [], "environment": []}))
+    monkeypatch.setattr(rules, "SNAPSHOT_PATH", p)
+    assert rules.load_snapshot().hard_deny == []
+
+
+def test_real_snapshot_has_all_four_sections():
+    """Guards the shipped rules/snapshot.json against a partial refresh."""
+    snap = rules.load_snapshot()
+    assert snap.allow and snap.soft_deny and snap.environment and snap.hard_deny
 
 
 def test_snapshot_age_days(tmp_repo):

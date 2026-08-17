@@ -27,6 +27,7 @@ class Snapshot:
     allow: list[str]
     soft_deny: list[str]
     environment: list[str]
+    hard_deny: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -127,6 +128,7 @@ def load_snapshot() -> Snapshot:
         allow=raw.get("allow", []),
         soft_deny=raw.get("soft_deny", []),
         environment=raw.get("environment", []),
+        hard_deny=raw.get("hard_deny", []),
     )
 
 
