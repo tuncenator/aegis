@@ -115,7 +115,9 @@ def main() -> int:
         latency_ms=int((time.time() - t0) * 1000),
     )
 
-    sys.stdout.write(decision.to_hook_output(d))
+    # In ask_mode="defer" an ASK surfaces as the empty string, so nothing
+    # is written and Claude Code's own permission pipeline decides.
+    sys.stdout.write(decision.to_hook_output(d, cfg.ask_mode))
     return 0
 
 

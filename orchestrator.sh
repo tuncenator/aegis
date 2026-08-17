@@ -18,6 +18,15 @@
 #   - Agent/Task (subagent dispatch): each subagent tool call comes back
 #     through this hook, so gating the dispatch adds noise without safety.
 #   - WebFetch/WebSearch: read-only network reads, no side effects.
+#
+# ASK handling is centralized here, not in the layer scripts. The layers
+# stay pure pattern matchers that emit their ask JSON; this file decides
+# whether that ask reaches Claude Code (ask_mode=prompt) or is swallowed
+# into a silent exit 0 (ask_mode=defer). Converting inside a layer would
+# be wrong: the orchestrator reads an empty layer result as "no match" and
+# would continue to the NEXT Aegis layer, so a deferred hard-ask could end
+# up allowed by the gatekeeper or the LLM classifier instead of handed to
+# Claude Code's native auto-mode classifier.
 
 set -u
 
@@ -38,7 +47,7 @@ mock_classifier() {
   case "${AEGIS_TEST_MOCK_DECISION:-}" in
     allow) echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}'; exit 0 ;;
     deny)  echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"mock"}}'; exit 0 ;;
-    ask)   echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask"}}'; exit 0 ;;
+    ask)   emit_ask '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask"}}' ;;
     *) return 1 ;;
   esac
 }
@@ -48,10 +57,24 @@ emit_allow() {
   exit 0
 }
 
+# Surface an ASK, or swallow it when ask_mode=defer. Always exits 0.
+emit_ask() {
+  if [ "$ASK_MODE" != "defer" ]; then
+    echo "$1"
+  fi
+  exit 0
+}
+
 # Read whole stdin; we'll re-feed it to layer scripts.
 INPUT=$(cat)
 TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty')
 SESS=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
+CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
+
+# shellcheck source=lib/ask-mode.sh
+. "$LIB/ask-mode.sh"
+ASK_MODE=$(aegis_resolve_ask_mode "$CWD")
+export AEGIS_ASK_MODE="$ASK_MODE"
 
 # Diag emitter for deterministic layers. Calls a python one-liner.
 diag_emit() {
@@ -97,12 +120,18 @@ if [ "$TOOL" = "Bash" ]; then
   out=$(echo "$INPUT" | "$LIB/bash-hard-ask.sh")
   if [ -n "$out" ]; then
     diag_emit "hard-ask" "ask" "$(echo "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason // "hard-ask matched"')" "$SESS" "$TOOL"
-    echo "$out"; exit 0
+    emit_ask "$out"
   fi
 
-  # Layer 3: hard-allow (gatekeeper).
+  # Layer 3: hard-allow (gatekeeper). The gatekeeper also has one ASK exit
+  # (heredoc body containing a DB write), so read its verdict rather than
+  # treating any output as an allow.
   out=$(echo "$INPUT" | "$LIB/bash-gatekeeper.sh")
   if [ -n "$out" ]; then
+    if echo "$out" | grep -q '"permissionDecision":"ask"'; then
+      diag_emit "hard-ask" "ask" "bash-gatekeeper ask" "$SESS" "$TOOL"
+      emit_ask "$out"
+    fi
     diag_emit "hard-allow" "allow" "bash-gatekeeper matched" "$SESS" "$TOOL"
     echo "$out"; exit 0
   fi
@@ -119,7 +148,7 @@ case "$TOOL" in
     out=$(echo "$INPUT" | "$LIB/protected-paths.sh")
     if [ -n "$out" ]; then
       diag_emit "protected-paths" "ask" "$(echo "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason // "protected path"')" "$SESS" "$TOOL"
-      echo "$out"; exit 0
+      emit_ask "$out"
     fi
     mock_classifier && exit 0
     echo "$INPUT" | env PYTHONPATH="$DIR" python3 -m classifier

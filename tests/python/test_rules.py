@@ -95,3 +95,46 @@ def test_load_config_project_overrides_global(tmp_path, monkeypatch):
     cfg = rules.load_config(project_dir=str(proj))
     assert cfg.consecutive_deny_limit == 10  # project override
     assert cfg.total_deny_limit == 50  # inherited from global
+
+
+def test_ask_mode_defaults_to_prompt(tmp_path, monkeypatch):
+    monkeypatch.delenv("AEGIS_ASK_MODE", raising=False)
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", tmp_path / "missing.toml")
+    assert rules.load_config(project_dir=None).ask_mode == "prompt"
+
+
+def test_ask_mode_defer_from_global_config(tmp_path, monkeypatch):
+    monkeypatch.delenv("AEGIS_ASK_MODE", raising=False)
+    g = tmp_path / "aegis.toml"
+    g.write_text('[behavior]\nask_mode = "defer"\n')
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", g)
+    assert rules.load_config(project_dir=None).ask_mode == "defer"
+
+
+def test_ask_mode_project_overrides_global(tmp_path, monkeypatch):
+    monkeypatch.delenv("AEGIS_ASK_MODE", raising=False)
+    g = tmp_path / "global.toml"
+    g.write_text('[behavior]\nask_mode = "defer"\n')
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", g)
+    proj = tmp_path / "proj"
+    (proj / ".aegis").mkdir(parents=True)
+    (proj / ".aegis" / "aegis.toml").write_text('[behavior]\nask_mode = "prompt"\n')
+    assert rules.load_config(project_dir=str(proj)).ask_mode == "prompt"
+
+
+def test_ask_mode_invalid_value_ignored(tmp_path, monkeypatch):
+    monkeypatch.delenv("AEGIS_ASK_MODE", raising=False)
+    g = tmp_path / "aegis.toml"
+    g.write_text('[behavior]\nask_mode = "yolo"\n')
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", g)
+    assert rules.load_config(project_dir=None).ask_mode == "prompt"
+
+
+def test_ask_mode_env_var_wins(tmp_path, monkeypatch):
+    """orchestrator.sh resolves the mode once and exports it, so the
+    classifier agrees with the deterministic layers."""
+    g = tmp_path / "aegis.toml"
+    g.write_text('[behavior]\nask_mode = "prompt"\n')
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", g)
+    monkeypatch.setenv("AEGIS_ASK_MODE", "defer")
+    assert rules.load_config(project_dir=None).ask_mode == "defer"

@@ -11,6 +11,7 @@ Snapshot lives at <repo>/rules/snapshot.json with metadata at snapshot.meta.json
 from __future__ import annotations
 
 import json
+import os
 import tomllib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -20,6 +21,16 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SNAPSHOT_PATH = REPO_ROOT / "rules" / "snapshot.json"
 SNAPSHOT_META_PATH = REPO_ROOT / "rules" / "snapshot.meta.json"
 GLOBAL_CONFIG_PATH = Path.home() / ".config" / "aegis" / "aegis.toml"
+
+# [behavior] ask_mode -- what Aegis does with an ASK verdict.
+#   "prompt" (default): emit permissionDecision:ask, Claude Code prompts
+#            the user. Preserves historical behavior.
+#   "defer":  emit nothing and exit 0, the only hook result that falls
+#            through to Claude Code's own permission pipeline so its
+#            native auto-mode classifier decides. An "allow" or an "ask"
+#            from a PreToolUse hook both short-circuit that pipeline.
+# Hard denies (exit 2) and allows are unaffected by this setting.
+ASK_MODES = ("prompt", "defer")
 
 
 @dataclass
@@ -54,6 +65,7 @@ class Config:
     trusted_services: list[str] = field(default_factory=list)
     diag_path: str = "~/.cache/aegis/decisions.jsonl"
     log_level: str = "info"
+    ask_mode: str = "prompt"
 
 
 _DEFAULT_CHAIN = [
@@ -118,6 +130,16 @@ def load_config(project_dir: str | None) -> Config:
         log = raw.get("logging", {})
         cfg.diag_path = log.get("diag_path", cfg.diag_path)
         cfg.log_level = log.get("level", cfg.log_level)
+
+        beh = raw.get("behavior", {})
+        if beh.get("ask_mode") in ASK_MODES:
+            cfg.ask_mode = beh["ask_mode"]
+
+    # orchestrator.sh resolves ask_mode once and exports it, so the whole
+    # pipeline (deterministic layers and this classifier) agrees even when
+    # the classifier is reached through a different cwd.
+    if os.environ.get("AEGIS_ASK_MODE") in ASK_MODES:
+        cfg.ask_mode = os.environ["AEGIS_ASK_MODE"]
 
     return cfg
 

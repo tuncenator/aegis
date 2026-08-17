@@ -115,6 +115,38 @@ The starter config sets the classifier provider chain (gemini-flash-lite
 -> gemini-flash -> claude-haiku), deny counters, snapshot TTL, transcript
 context limits, and trusted-environment hints.
 
+### `ask_mode`: prompt or defer
+
+```toml
+[behavior]
+ask_mode = "prompt"   # or "defer"
+```
+
+`prompt` (default) is the historical behavior: an ASK verdict is emitted
+as `permissionDecision: ask` and Claude Code prompts you.
+
+`defer` emits nothing at all on an ASK -- exit 0, empty stdout. That is
+the only hook result that falls through to Claude Code's own permission
+pipeline, so its native auto-mode classifier takes the ambiguous middle
+instead of interrupting an automated run. A PreToolUse hook that returns
+`allow` *or* `ask` short-circuits that pipeline, which is why the ask has
+to be dropped rather than rewritten.
+
+Unaffected by this setting:
+- hard denies from `lib/bash-denylist.sh` (exit 2) still hard-block;
+- allows are still emitted as allows;
+- the diagnostic log still records the verdict Aegis reached, so a
+  deferred ask is still visible in `~/.cache/aegis/decisions.jsonl`.
+
+The mode is resolved once per hook invocation by `orchestrator.sh`
+(project toml overrides global toml, and an `AEGIS_ASK_MODE` environment
+variable overrides both) and exported so the deterministic layers and the
+Python classifier agree.
+
+`defer` hands the ambiguous middle to Anthropic's classifier, which is
+laxer than an explicit human prompt. Keep `prompt` if you want to see
+every ambiguous call.
+
 ## Toggles
 
 In-session slash commands:
@@ -151,6 +183,7 @@ uv sync                                                 # python deps
 uv run python -m pytest tests/python/ -v                # python tests
 tests/bash/run.sh                                       # bash corpus
 AEGIS_TEST_MOCK_DECISION=ask tests/bash/orchestrator-cases.sh
+tests/bash/ask-mode-cases.sh                            # ask_mode prompt/defer
 ```
 
 ## Spec

@@ -76,3 +76,28 @@ def test_to_hook_output_deny_with_empty_reason_omits_reason():
     # Downgraded to ask (per classifier-deny policy); empty reason omitted.
     assert parsed["hookSpecificOutput"]["permissionDecision"] == "ask"
     assert "permissionDecisionReason" not in parsed["hookSpecificOutput"]
+
+
+def test_to_hook_output_ask_deferred_is_empty():
+    """ask_mode="defer": an ASK surfaces as nothing at all. Empty stdout
+    with exit 0 is the only hook result that falls through to Claude
+    Code's own permission pipeline instead of short-circuiting it."""
+    d = decision.Decision(decision="ask", reason="looks risky")
+    assert decision.to_hook_output(d, "defer") == ""
+
+
+def test_to_hook_output_downgraded_deny_also_deferred():
+    """Classifier DENY is downgraded to ASK first, so it defers too."""
+    d = decision.Decision(decision="deny", reason="force push")
+    assert decision.to_hook_output(d, "defer") == ""
+
+
+def test_to_hook_output_allow_unaffected_by_defer():
+    d = decision.Decision(decision="allow", reason="x")
+    parsed = json.loads(decision.to_hook_output(d, "defer"))
+    assert parsed["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+
+def test_to_hook_output_prompt_mode_is_the_default():
+    d = decision.Decision(decision="ask", reason="r")
+    assert decision.to_hook_output(d) == decision.to_hook_output(d, "prompt")

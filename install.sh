@@ -116,6 +116,14 @@ trusted_services = []
 [logging]
 diag_path = "~/.cache/aegis/decisions.jsonl"
 level = "info"
+
+[behavior]
+# What happens on an ASK verdict.
+#   "prompt" -- surface it, Claude Code prompts you.
+#   "defer"  -- emit nothing, so Claude Code's own auto-mode classifier
+#               decides instead of interrupting you. Hard denies and
+#               allows behave the same in both modes.
+ask_mode = "prompt"
 EOF
   echo "Wrote starter config: $CONFIG_DIR/aegis.toml"
 else

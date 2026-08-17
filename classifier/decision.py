@@ -44,7 +44,7 @@ def parse_response(text: str) -> Decision:
     return Decision(decision=d, reason=str(obj.get("reason", "")))
 
 
-def to_hook_output(d: Decision) -> str:
+def to_hook_output(d: Decision, ask_mode: str = "prompt") -> str:
     """Convert a classifier Decision to a Claude Code hook payload.
 
     Classifier-emitted DENY is downgraded to ASK so the user always has
@@ -54,8 +54,16 @@ def to_hook_output(d: Decision) -> str:
     this function runs. State counters and the diagnostic log still see
     the classifier's original verdict, so deny-storms can still auto-
     pause the session even though each individual ASK is overridable.
+
+    With ask_mode="defer" an ASK surfaces as the empty string instead:
+    the caller writes nothing and exits 0, which is the only hook result
+    that falls through to Claude Code's own permission pipeline, letting
+    its native auto-mode classifier take the ambiguous middle rather than
+    interrupting the user. Allows are unaffected.
     """
     surfaced = "ask" if d.decision == "deny" else d.decision
+    if surfaced == "ask" and ask_mode == "defer":
+        return ""
     payload = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",

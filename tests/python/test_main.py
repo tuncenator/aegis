@@ -87,3 +87,49 @@ def test_main_disabled_session_falls_through(monkeypatch, fake_stdin, capsys, tm
     assert rc == 0
     assert capsys.readouterr().out.strip() == ""
     assert mock_diag == []  # silent fall-through emits NO diag row
+
+
+def test_main_ask_is_silent_in_defer_mode(monkeypatch, fake_stdin, capsys, mock_diag):
+    """The classifier still runs and still records its verdict; it just
+    writes nothing, so Claude Code's native auto-mode classifier decides."""
+    monkeypatch.setenv("AEGIS_ASK_MODE", "defer")
+    monkeypatch.setattr(main_mod, "_call_provider",
+                         lambda *a, **kw: '{"decision":"ask","reason":"unclear"}')
+    fake_stdin({"tool_name": "Bash", "tool_input": {"command": "frobnicate"},
+                "session_id": "s-defer-1"})
+    assert main_mod.main() == 0
+    assert capsys.readouterr().out == ""
+    assert mock_diag[0]["decision"] == "ask"  # verdict still logged
+
+
+def test_main_deny_is_silent_in_defer_mode(monkeypatch, fake_stdin, capsys, mock_diag):
+    """Classifier DENY is downgraded to ASK before surfacing, so it defers
+    too. Only the deterministic bash-denylist layer hard-blocks (rc=2), and
+    that never reaches this code path."""
+    monkeypatch.setenv("AEGIS_ASK_MODE", "defer")
+    monkeypatch.setattr(main_mod, "_call_provider",
+                         lambda *a, **kw: '{"decision":"deny","reason":"risky"}')
+    fake_stdin({"tool_name": "Bash", "tool_input": {"command": "frobnicate"},
+                "session_id": "s-defer-2"})
+    assert main_mod.main() == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_main_allow_unaffected_in_defer_mode(monkeypatch, fake_stdin, capsys):
+    monkeypatch.setenv("AEGIS_ASK_MODE", "defer")
+    monkeypatch.setattr(main_mod, "_call_provider",
+                         lambda *a, **kw: '{"decision":"allow","reason":"ok"}')
+    fake_stdin({"tool_name": "Bash", "tool_input": {"command": "ls"},
+                "session_id": "s-defer-3"})
+    assert main_mod.main() == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+
+def test_main_exhaustion_ask_is_silent_in_defer_mode(monkeypatch, fake_stdin, capsys):
+    monkeypatch.setenv("AEGIS_ASK_MODE", "defer")
+    monkeypatch.setattr(main_mod, "_call_provider", lambda *a, **kw: None)
+    fake_stdin({"tool_name": "Bash", "tool_input": {"command": "ls"},
+                "session_id": "s-defer-4"})
+    assert main_mod.main() == 0
+    assert capsys.readouterr().out == ""
