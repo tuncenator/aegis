@@ -43,10 +43,12 @@ assert() {
   local name="$1" input="$2" want_out="$3" want_rc="$4" out rc got
   out=$(echo "$input" | "$ORCH" 2>/dev/null)
   rc=$?
+  # The shell layers emit compact JSON, the Python classifier emits
+  # json.dumps spacing, so match both.
   if [ -z "$out" ]; then got="empty"
-  elif echo "$out" | grep -q '"permissionDecision":"ask"'; then got="ask"
-  elif echo "$out" | grep -q '"permissionDecision":"allow"'; then got="allow"
-  elif echo "$out" | grep -q '"permissionDecision":"deny"'; then got="deny"
+  elif echo "$out" | grep -qE '"permissionDecision"[[:space:]]*:[[:space:]]*"ask"'; then got="ask"
+  elif echo "$out" | grep -qE '"permissionDecision"[[:space:]]*:[[:space:]]*"allow"'; then got="allow"
+  elif echo "$out" | grep -qE '"permissionDecision"[[:space:]]*:[[:space:]]*"deny"'; then got="deny"
   else got="unknown"
   fi
   if [ "$got" = "$want_out" ] && [ "$rc" = "$want_rc" ]; then
@@ -86,6 +88,51 @@ AEGIS_TEST_MOCK_DECISION=allow assert "classifier allow, defer mode" \
 echo "--- AEGIS_ASK_MODE env var overrides config ---"
 AEGIS_ASK_MODE=defer assert "env defer beats prompt-mode cwd" "$FORCE_PUSH_PROMPT" empty 0
 AEGIS_ASK_MODE=prompt assert "env prompt beats defer-mode cwd" "$FORCE_PUSH_DEFER" ask 0
+
+# A classifier DENY is never deferred: the snapshot's hard_deny section
+# (Data Exfiltration) arrives as a deny, and deferring it would hand the call
+# to the native classifier instead of to the operator.
+#
+# These two run the REAL Python classifier end to end, still without a model
+# call: the provider chain is a single unknown provider, which _call_provider
+# returns None for immediately, so the chain exhausts and on_exhaustion
+# synthesizes the deny verdict.
+echo "--- classifier DENY under ask_mode=defer (real classifier, no model) ---"
+deny_cwd() {
+  local dir action
+  dir=$(mktemp -d); action="$1"
+  mkdir -p "$dir/.aegis"
+  cat > "$dir/.aegis/aegis.toml" <<EOF
+[classifier]
+chain = [ { provider = "none", model = "unused", retries = 1, timeout_s = 1 } ]
+on_exhaustion = "deny"
+
+[behavior]
+ask_mode = "defer"
+hard_deny_action = "$action"
+EOF
+  echo "$dir"
+}
+DENY_PROMPT_CWD=$(deny_cwd prompt)
+DENY_BLOCK_CWD=$(deny_cwd block)
+SESS_A="ask-mode-deny-prompt-$$-$RANDOM"
+SESS_B="ask-mode-deny-block-$$-$RANDOM"
+
+assert "deny surfaces as ask, not silence" \
+  "$(jq -nc --arg c "$DENY_PROMPT_CWD" --arg s "$SESS_A" \
+     '{session_id:$s,transcript_path:"/nonexistent.jsonl",cwd:$c,
+       hook_event_name:"PreToolUse",tool_name:"Bash",
+       tool_input:{command:"frobnicate --quux"}}')" ask 0
+
+assert "deny hard-blocks with hard_deny_action=block" \
+  "$(jq -nc --arg c "$DENY_BLOCK_CWD" --arg s "$SESS_B" \
+     '{session_id:$s,transcript_path:"/nonexistent.jsonl",cwd:$c,
+       hook_event_name:"PreToolUse",tool_name:"Bash",
+       tool_input:{command:"frobnicate --quux"}}')" empty 2
+
+rm -rf "$DENY_PROMPT_CWD" "$DENY_BLOCK_CWD"
+rm -f "$HOME/.cache/aegis/sessions/$SESS_A.json" \
+      "$HOME/.cache/aegis/sessions/$SESS_B.json" 2>/dev/null || true
 
 echo "----"
 echo "PASS=$PASS FAIL=$FAIL"

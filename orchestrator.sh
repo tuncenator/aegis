@@ -136,10 +136,12 @@ if [ "$TOOL" = "Bash" ]; then
     echo "$out"; exit 0
   fi
 
-  # Layer 4: classifier.
+  # Layer 4: classifier. Its exit code is propagated: with
+  # [behavior] hard_deny_action = "block" it returns 2 (hard block) instead
+  # of writing a decision.
   mock_classifier && exit 0
   echo "$INPUT" | env PYTHONPATH="$DIR" python3 -m classifier
-  exit 0
+  exit $?
 fi
 
 # Edit / Write / NotebookEdit: protected-paths first, then classifier.
@@ -152,7 +154,7 @@ case "$TOOL" in
     fi
     mock_classifier && exit 0
     echo "$INPUT" | env PYTHONPATH="$DIR" python3 -m classifier
-    exit 0
+    exit $?
     ;;
 esac
 

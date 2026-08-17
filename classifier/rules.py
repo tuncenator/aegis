@@ -32,6 +32,18 @@ GLOBAL_CONFIG_PATH = Path.home() / ".config" / "aegis" / "aegis.toml"
 # Hard denies (exit 2) and allows are unaffected by this setting.
 ASK_MODES = ("prompt", "defer")
 
+# [behavior] hard_deny_action -- what a classifier DENY verdict does. The
+# snapshot's hard_deny section (Data Exfiltration) reaches the classifier
+# as a DENY, and a DENY is never deferred in either setting: ask_mode
+# exists to let the native classifier absorb genuine ambiguity, and a deny
+# verdict is not ambiguity.
+#   "prompt" (default): downgraded to ASK and always surfaced, so the
+#            operator sees the model's reason and stays the final
+#            authority. Matches the README's stated philosophy.
+#   "block":  the classifier exits 2 with the reason on stderr, a real
+#            hard block with no override short of disabling Aegis.
+HARD_DENY_ACTIONS = ("prompt", "block")
+
 
 @dataclass
 class Snapshot:
@@ -66,6 +78,7 @@ class Config:
     diag_path: str = "~/.cache/aegis/decisions.jsonl"
     log_level: str = "info"
     ask_mode: str = "prompt"
+    hard_deny_action: str = "prompt"
 
 
 _DEFAULT_CHAIN = [
@@ -134,12 +147,16 @@ def load_config(project_dir: str | None) -> Config:
         beh = raw.get("behavior", {})
         if beh.get("ask_mode") in ASK_MODES:
             cfg.ask_mode = beh["ask_mode"]
+        if beh.get("hard_deny_action") in HARD_DENY_ACTIONS:
+            cfg.hard_deny_action = beh["hard_deny_action"]
 
     # orchestrator.sh resolves ask_mode once and exports it, so the whole
     # pipeline (deterministic layers and this classifier) agrees even when
     # the classifier is reached through a different cwd.
     if os.environ.get("AEGIS_ASK_MODE") in ASK_MODES:
         cfg.ask_mode = os.environ["AEGIS_ASK_MODE"]
+    if os.environ.get("AEGIS_HARD_DENY_ACTION") in HARD_DENY_ACTIONS:
+        cfg.hard_deny_action = os.environ["AEGIS_HARD_DENY_ACTION"]
 
     return cfg
 

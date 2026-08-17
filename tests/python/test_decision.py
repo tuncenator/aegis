@@ -86,12 +86,6 @@ def test_to_hook_output_ask_deferred_is_empty():
     assert decision.to_hook_output(d, "defer") == ""
 
 
-def test_to_hook_output_downgraded_deny_also_deferred():
-    """Classifier DENY is downgraded to ASK first, so it defers too."""
-    d = decision.Decision(decision="deny", reason="force push")
-    assert decision.to_hook_output(d, "defer") == ""
-
-
 def test_to_hook_output_allow_unaffected_by_defer():
     d = decision.Decision(decision="allow", reason="x")
     parsed = json.loads(decision.to_hook_output(d, "defer"))
@@ -101,3 +95,43 @@ def test_to_hook_output_allow_unaffected_by_defer():
 def test_to_hook_output_prompt_mode_is_the_default():
     d = decision.Decision(decision="ask", reason="r")
     assert decision.to_hook_output(d) == decision.to_hook_output(d, "prompt")
+
+
+def test_to_hook_output_deny_is_never_deferred():
+    """The snapshot's hard_deny section (Data Exfiltration) reaches this
+    code as a deny. Deferring it would hand an exfiltration call to the
+    native classifier instead of to the operator, so a deny always
+    surfaces even in defer mode."""
+    d = decision.Decision(decision="deny", reason="Data Exfiltration: creds to pastebin")
+    out = decision.to_hook_output(d, "defer")
+    assert out != ""
+    parsed = json.loads(out)
+    assert parsed["hookSpecificOutput"]["permissionDecision"] == "ask"
+    assert parsed["hookSpecificOutput"]["permissionDecisionReason"] == \
+        "Data Exfiltration: creds to pastebin"
+
+
+def test_surface_deny_prompts_by_default():
+    d = decision.Decision(decision="deny", reason="Data Exfiltration: creds to pastebin")
+    out, rc = decision.surface(d, ask_mode="defer", hard_deny_action="prompt")
+    assert rc == 0
+    assert json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "ask"
+
+
+def test_surface_deny_blocks_when_configured():
+    d = decision.Decision(decision="deny", reason="Data Exfiltration: creds to pastebin")
+    out, rc = decision.surface(d, ask_mode="defer", hard_deny_action="block")
+    assert rc == 2
+    assert out == ""  # stdout is ignored for rc=2; the reason goes to stderr
+
+
+def test_surface_ask_still_defers():
+    d = decision.Decision(decision="ask", reason="unclear")
+    assert decision.surface(d, "defer", "block") == ("", 0)
+
+
+def test_surface_allow_unaffected_by_block():
+    d = decision.Decision(decision="allow", reason="ok")
+    out, rc = decision.surface(d, "defer", "block")
+    assert rc == 0
+    assert json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "allow"

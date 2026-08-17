@@ -138,3 +138,25 @@ def test_ask_mode_env_var_wins(tmp_path, monkeypatch):
     monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", g)
     monkeypatch.setenv("AEGIS_ASK_MODE", "defer")
     assert rules.load_config(project_dir=None).ask_mode == "defer"
+
+
+def test_hard_deny_action_defaults_to_prompt(tmp_path, monkeypatch):
+    monkeypatch.delenv("AEGIS_HARD_DENY_ACTION", raising=False)
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", tmp_path / "missing.toml")
+    assert rules.load_config(project_dir=None).hard_deny_action == "prompt"
+
+
+def test_hard_deny_action_block_from_config(tmp_path, monkeypatch):
+    monkeypatch.delenv("AEGIS_HARD_DENY_ACTION", raising=False)
+    g = tmp_path / "aegis.toml"
+    g.write_text('[behavior]\nhard_deny_action = "block"\n')
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", g)
+    assert rules.load_config(project_dir=None).hard_deny_action == "block"
+
+
+def test_hard_deny_action_invalid_value_ignored(tmp_path, monkeypatch):
+    monkeypatch.delenv("AEGIS_HARD_DENY_ACTION", raising=False)
+    g = tmp_path / "aegis.toml"
+    g.write_text('[behavior]\nhard_deny_action = "nuke"\n')
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", g)
+    assert rules.load_config(project_dir=None).hard_deny_action == "prompt"

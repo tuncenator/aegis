@@ -124,6 +124,11 @@ level = "info"
 #               decides instead of interrupting you. Hard denies and
 #               allows behave the same in both modes.
 ask_mode = "prompt"
+# What a classifier DENY verdict does (the snapshot's hard_deny section,
+# Data Exfiltration, arrives as a deny). A deny is never deferred.
+#   "prompt" -- downgrade to ASK and always surface it, you decide.
+#   "block"  -- exit 2, a real hard block with no override.
+hard_deny_action = "prompt"
 EOF
   echo "Wrote starter config: $CONFIG_DIR/aegis.toml"
 else

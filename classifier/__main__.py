@@ -116,9 +116,16 @@ def main() -> int:
     )
 
     # In ask_mode="defer" an ASK surfaces as the empty string, so nothing
-    # is written and Claude Code's own permission pipeline decides.
-    sys.stdout.write(decision.to_hook_output(d, cfg.ask_mode))
-    return 0
+    # is written and Claude Code's own permission pipeline decides. A DENY
+    # verdict is never deferred; with hard_deny_action="block" it comes
+    # back as rc=2, Claude Code's hard block, with the reason on stderr
+    # (stdout is ignored for rc=2).
+    out, rc = decision.surface(d, cfg.ask_mode, cfg.hard_deny_action)
+    if rc == 2:
+        sys.stderr.write(f"aegis: blocked -- {d.reason}\n")
+    else:
+        sys.stdout.write(out)
+    return rc
 
 
 if __name__ == "__main__":
