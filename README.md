@@ -22,10 +22,12 @@ classifier's reasoning attached.
   `rm -rf` on system paths (`/`, `~`, `/etc`, `/var`, `/usr`, ...).
   Everything else flows through ASK.
 
-The classifier itself never produces a hard block. If the LLM thinks
+By default the classifier never produces a hard block. If the LLM thinks
 something is bad enough to deny, that surfaces as ASK with the LLM's
 reason as the prompt text -- so the user sees *why* the model objected
 and can decide. Aegis is advisory; the operator is the final authority.
+(`[behavior] hard_deny_action = "block"` opts out of that and lets a
+classifier deny exit 2. Off by default.)
 
 ## Pipeline
 
@@ -115,6 +117,71 @@ The starter config sets the classifier provider chain (gemini-flash-lite
 -> gemini-flash -> claude-haiku), deny counters, snapshot TTL, transcript
 context limits, and trusted-environment hints.
 
+### `ask_mode`: prompt or defer
+
+```toml
+[behavior]
+ask_mode = "prompt"   # or "defer"
+```
+
+`prompt` (default) is the historical behavior: an ASK verdict is emitted
+as `permissionDecision: ask` and Claude Code prompts you.
+
+`defer` emits nothing at all on an ASK -- exit 0, empty stdout. That is
+the only hook result that falls through to Claude Code's own permission
+pipeline, so its native auto-mode classifier takes the ambiguous middle
+instead of interrupting an automated run. A PreToolUse hook that returns
+`allow` *or* `ask` short-circuits that pipeline, which is why the ask has
+to be dropped rather than rewritten.
+
+Unaffected by this setting:
+- hard denies from `lib/bash-denylist.sh` (exit 2) still hard-block;
+- allows are still emitted as allows;
+- a classifier **deny** verdict is never deferred (see `hard_deny_action`);
+- the diagnostic log still records the verdict Aegis reached, so a
+  deferred ask is still visible in `~/.cache/aegis/decisions.jsonl`.
+
+What *does* defer: genuine ambiguity. That includes the deterministic
+hard-ask patterns (force push, `curl | shell`, ssh to prod-named hosts,
+protected paths) and the classifier's own `ask` verdicts.
+
+The mode is resolved once per hook invocation by `orchestrator.sh`
+(project toml overrides global toml, and an `AEGIS_ASK_MODE` environment
+variable overrides both) and exported so the deterministic layers and the
+Python classifier agree.
+
+`defer` hands the ambiguous middle to Anthropic's classifier, which is
+laxer than an explicit human prompt. Keep `prompt` if you want to see
+every ambiguous call.
+
+### `hard_deny_action`: what a classifier deny does
+
+```toml
+[behavior]
+hard_deny_action = "prompt"   # or "block"
+```
+
+The rule snapshot has a `hard_deny` section (currently one rule, Data
+Exfiltration) that the system prompt renders as unconditional. It reaches
+the code as a classifier `deny` verdict, and classifier denies have always
+been downgraded to ASK so the operator keeps an override. Two consequences
+worth being explicit about:
+
+- A deny is **never** deferred, in either `ask_mode`. Handing an
+  exfiltration call to the native classifier instead of to you would be
+  the wrong failure direction, so `ask_mode = "defer"` does not apply to
+  deny verdicts.
+- `prompt` (default) keeps the downgrade: you see the model's reason and
+  decide. This preserves "Aegis is advisory; the operator is the final
+  authority".
+- `block` makes the classifier exit 2 instead, Claude Code's hard block,
+  with the reason on stderr and no override short of disabling Aegis.
+  Note the classifier is an LLM: a false positive under `block` cannot be
+  waived in-session.
+
+The system prompt still describes DENY as a hard block. Under the default
+`prompt` it is not one; that wording predates this setting.
+
 ## Toggles
 
 In-session slash commands:
@@ -151,6 +218,7 @@ uv sync                                                 # python deps
 uv run python -m pytest tests/python/ -v                # python tests
 tests/bash/run.sh                                       # bash corpus
 AEGIS_TEST_MOCK_DECISION=ask tests/bash/orchestrator-cases.sh
+tests/bash/ask-mode-cases.sh                            # ask_mode prompt/defer
 ```
 
 ## Spec

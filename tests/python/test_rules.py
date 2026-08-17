@@ -9,7 +9,8 @@ from classifier import rules
 
 @pytest.fixture
 def tmp_repo(tmp_path, monkeypatch):
-    snap = {"allow": ["A1", "A2"], "soft_deny": ["D1"], "environment": []}
+    snap = {"allow": ["A1", "A2"], "soft_deny": ["D1"], "environment": ["E1"],
+            "hard_deny": ["H1"]}
     (tmp_path / "snapshot.json").write_text(json.dumps(snap))
     (tmp_path / "snapshot.meta.json").write_text(json.dumps({
         "fetched_at": "2026-04-30T00:00:00Z",
@@ -25,6 +26,22 @@ def test_load_snapshot(tmp_repo):
     snap = rules.load_snapshot()
     assert "A1" in snap.allow
     assert "D1" in snap.soft_deny
+    assert "E1" in snap.environment
+    assert "H1" in snap.hard_deny
+
+
+def test_load_snapshot_without_hard_deny_defaults_empty(tmp_path, monkeypatch):
+    """Older snapshots predate the hard_deny section."""
+    p = tmp_path / "snapshot.json"
+    p.write_text(json.dumps({"allow": [], "soft_deny": [], "environment": []}))
+    monkeypatch.setattr(rules, "SNAPSHOT_PATH", p)
+    assert rules.load_snapshot().hard_deny == []
+
+
+def test_real_snapshot_has_all_four_sections():
+    """Guards the shipped rules/snapshot.json against a partial refresh."""
+    snap = rules.load_snapshot()
+    assert snap.allow and snap.soft_deny and snap.environment and snap.hard_deny
 
 
 def test_snapshot_age_days(tmp_repo):
@@ -78,3 +95,68 @@ def test_load_config_project_overrides_global(tmp_path, monkeypatch):
     cfg = rules.load_config(project_dir=str(proj))
     assert cfg.consecutive_deny_limit == 10  # project override
     assert cfg.total_deny_limit == 50  # inherited from global
+
+
+def test_ask_mode_defaults_to_prompt(tmp_path, monkeypatch):
+    monkeypatch.delenv("AEGIS_ASK_MODE", raising=False)
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", tmp_path / "missing.toml")
+    assert rules.load_config(project_dir=None).ask_mode == "prompt"
+
+
+def test_ask_mode_defer_from_global_config(tmp_path, monkeypatch):
+    monkeypatch.delenv("AEGIS_ASK_MODE", raising=False)
+    g = tmp_path / "aegis.toml"
+    g.write_text('[behavior]\nask_mode = "defer"\n')
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", g)
+    assert rules.load_config(project_dir=None).ask_mode == "defer"
+
+
+def test_ask_mode_project_overrides_global(tmp_path, monkeypatch):
+    monkeypatch.delenv("AEGIS_ASK_MODE", raising=False)
+    g = tmp_path / "global.toml"
+    g.write_text('[behavior]\nask_mode = "defer"\n')
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", g)
+    proj = tmp_path / "proj"
+    (proj / ".aegis").mkdir(parents=True)
+    (proj / ".aegis" / "aegis.toml").write_text('[behavior]\nask_mode = "prompt"\n')
+    assert rules.load_config(project_dir=str(proj)).ask_mode == "prompt"
+
+
+def test_ask_mode_invalid_value_ignored(tmp_path, monkeypatch):
+    monkeypatch.delenv("AEGIS_ASK_MODE", raising=False)
+    g = tmp_path / "aegis.toml"
+    g.write_text('[behavior]\nask_mode = "yolo"\n')
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", g)
+    assert rules.load_config(project_dir=None).ask_mode == "prompt"
+
+
+def test_ask_mode_env_var_wins(tmp_path, monkeypatch):
+    """orchestrator.sh resolves the mode once and exports it, so the
+    classifier agrees with the deterministic layers."""
+    g = tmp_path / "aegis.toml"
+    g.write_text('[behavior]\nask_mode = "prompt"\n')
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", g)
+    monkeypatch.setenv("AEGIS_ASK_MODE", "defer")
+    assert rules.load_config(project_dir=None).ask_mode == "defer"
+
+
+def test_hard_deny_action_defaults_to_prompt(tmp_path, monkeypatch):
+    monkeypatch.delenv("AEGIS_HARD_DENY_ACTION", raising=False)
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", tmp_path / "missing.toml")
+    assert rules.load_config(project_dir=None).hard_deny_action == "prompt"
+
+
+def test_hard_deny_action_block_from_config(tmp_path, monkeypatch):
+    monkeypatch.delenv("AEGIS_HARD_DENY_ACTION", raising=False)
+    g = tmp_path / "aegis.toml"
+    g.write_text('[behavior]\nhard_deny_action = "block"\n')
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", g)
+    assert rules.load_config(project_dir=None).hard_deny_action == "block"
+
+
+def test_hard_deny_action_invalid_value_ignored(tmp_path, monkeypatch):
+    monkeypatch.delenv("AEGIS_HARD_DENY_ACTION", raising=False)
+    g = tmp_path / "aegis.toml"
+    g.write_text('[behavior]\nhard_deny_action = "nuke"\n')
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", g)
+    assert rules.load_config(project_dir=None).hard_deny_action == "prompt"

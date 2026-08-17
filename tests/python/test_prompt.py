@@ -20,6 +20,12 @@ def _snap():
                      soft_deny=["DenyRule1"], environment=[])
 
 
+def _full_snap():
+    return Snapshot(allow=["AllowRule1"], soft_deny=["DenyRule1"],
+                     environment=["**Organization**: ACME"],
+                     hard_deny=["Data Exfiltration: things listed in Environment"])
+
+
 def test_system_prompt_includes_rules_and_env():
     sp = prompt.build_system_prompt(_snap(), _cfg())
     assert "AllowRule1" in sp
@@ -31,6 +37,34 @@ def test_system_prompt_includes_rules_and_env():
     assert "DENY" in sp.upper()
     assert "ASK" in sp.upper()
     assert "SOFT DENY" in sp.upper()
+
+
+def test_system_prompt_renders_snapshot_environment():
+    """7 of the snapshot's deny rules say "listed in Environment"; without
+    this section they are ungrounded."""
+    sp = prompt.build_system_prompt(_full_snap(), _cfg())
+    assert "ENVIRONMENT (policy snapshot)" in sp
+    assert "**Organization**: ACME" in sp
+    # The cfg-supplied trusted lists must survive alongside it.
+    assert "ONLAYER" in sp
+    assert "example.com" in sp
+
+
+def test_system_prompt_renders_snapshot_hard_deny_as_unconditional():
+    sp = prompt.build_system_prompt(_full_snap(), _cfg())
+    assert "HARD DENY rules from policy snapshot" in sp
+    assert "Data Exfiltration: things listed in Environment" in sp
+    # Hard deny must read as unconditional, distinct from the soft-deny
+    # block which stays "default to ASK".
+    assert "do NOT default to ASK" in sp
+    assert "SOFT DENY rules (default to ASK" in sp
+
+
+def test_system_prompt_empty_hard_deny_and_environment_render_none():
+    sp = prompt.build_system_prompt(_snap(), _cfg())
+    assert "HARD DENY rules from policy snapshot" in sp
+    assert "ENVIRONMENT (policy snapshot)" in sp
+    assert sp.count("- (none)") == 2
 
 
 def test_user_prompt_includes_context_and_pending():
