@@ -49,6 +49,18 @@ if [ -x "$DIR/.venv/bin/python" ]; then
   export PATH="$DIR/.venv/bin:$PATH"
 fi
 
+# -P on every python3 invocation below is load bearing, and PYTHONPATH alone
+# does NOT substitute for it. For -m (as for -c) CPython puts the process's
+# CURRENT DIRECTORY at the FRONT of sys.path, ahead of PYTHONPATH. This hook's
+# cwd is the repository the agent has open, so a repo that checks in its own
+# `classifier/` package is imported here in place of Aegis's -- and layer 4 is
+# the layer that decides everything the deterministic layers did not. A repo
+# could therefore ship a three-line classifier/__main__.py that prints
+# permissionDecision:allow and auto-approve its own tool calls. Reproduced end
+# to end before this flag was added. -P suppresses that cwd entry; it needs
+# CPython 3.11+, which classifier/rules.py already requires for tomllib.
+# lib/ask-mode.sh passes -P for the same reason on its own resolver spawn.
+
 # Test-mode shortcut: when AEGIS_TEST_MOCK_DECISION is set, return that decision.
 mock_classifier() {
   case "${AEGIS_TEST_MOCK_DECISION:-}" in
@@ -93,9 +105,16 @@ CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 
 # shellcheck source=lib/ask-mode.sh
 . "$LIB/ask-mode.sh"
-ASK_MODE=$(aegis_resolve_ask_mode "$CWD")
+# ONE resolution for BOTH keys. These used to be two calls, and each call
+# re-read the config files: a config edit landing between them could combine
+# the ask_mode of one version with the defer_scope of another and produce a
+# defer/all pair that never existed on disk. aegis_resolve_behavior reads the
+# layers once, through the same tomllib loader the classifier uses, and
+# returns the pair.
+BEHAVIOR=$(aegis_resolve_behavior "$CWD")
+ASK_MODE=${BEHAVIOR%%$'\t'*}
+DEFER_SCOPE=${BEHAVIOR#*$'\t'}
 export AEGIS_ASK_MODE="$ASK_MODE"
-DEFER_SCOPE=$(aegis_resolve_defer_scope "$CWD")
 export AEGIS_DEFER_SCOPE="$DEFER_SCOPE"
 
 # Diag emitter for the deterministic layers. Delegates to classifier.diagcli
@@ -104,7 +123,7 @@ export AEGIS_DEFER_SCOPE="$DEFER_SCOPE"
 # meant the bash layers and the classifier could log to different files.
 diag_emit() {
   local layer="$1" decision="$2" reason="$3" sess="$4" tool="$5"
-  env PYTHONPATH="$DIR" python3 -m classifier.diagcli \
+  env PYTHONPATH="$DIR" python3 -P -m classifier.diagcli \
     "$sess" "$tool" "$layer" "$decision" "$reason" "${CWD:-}" 2>/dev/null || true
 }
 
@@ -153,7 +172,7 @@ if [ "$TOOL" = "Bash" ]; then
   # [behavior] hard_deny_action = "block" it returns 2 (hard block) instead
   # of writing a decision.
   mock_classifier && exit 0
-  echo "$INPUT" | env PYTHONPATH="$DIR" python3 -m classifier
+  echo "$INPUT" | env PYTHONPATH="$DIR" python3 -P -m classifier
   exit $?
 fi
 
@@ -166,11 +185,11 @@ case "$TOOL" in
       emit_ask "$out"
     fi
     mock_classifier && exit 0
-    echo "$INPUT" | env PYTHONPATH="$DIR" python3 -m classifier
+    echo "$INPUT" | env PYTHONPATH="$DIR" python3 -P -m classifier
     exit $?
     ;;
 esac
 
 # All other tools (MCP tools, etc.): straight to classifier.
 mock_classifier && exit 0
-echo "$INPUT" | exec env PYTHONPATH="$DIR" python3 -m classifier
+echo "$INPUT" | exec env PYTHONPATH="$DIR" python3 -P -m classifier

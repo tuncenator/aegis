@@ -212,6 +212,149 @@ deny_payload() {
 assert "deny surfaces as ask, not silence"  "$(deny_payload a)" ask   0 "$H_DENY_PROMPT"
 assert "deny hard-blocks with action=block" "$(deny_payload b)" empty 2 "$H_DENY_BLOCK"
 
+# ONE PARSER. ask_mode and defer_scope used to be read TWICE: by an awk line
+# matcher in lib/ask-mode.sh for the deterministic shell layers, and by tomllib
+# in classifier/rules.py for the classifier and `aegis status`.
+# orchestrator.sh exports the shell answer and rules.py lets the environment
+# override its own parsed value, so the awk reading was the one that actually
+# gated tool calls -- and it disagreed with the TOML spec on ordinary files.
+#
+# Each config below is one of those disagreements. The expected result is
+# always what the file MEANS, i.e. what tomllib says, because that is now the
+# only reading of it there is.
+echo "--- one parser: the shell layers agree with tomllib ---"
+unset AEGIS_ASK_MODE AEGIS_DEFER_SCOPE
+
+# The dangerous one, and the only divergence that ran LOOSER than the file.
+# The value here is a boolean, so defer_scope is never validly set and the
+# deterministic tripwires stay armed. The awk reader lifted "all" out of the
+# trailing COMMENT and disarmed them, while `aegis status` went on reporting
+# them active -- a silently disabled guard reads exactly like a working one.
+H_BOOL_COMMENT=$(mkhome '[behavior]
+ask_mode = "defer"
+defer_scope = false # "all"')
+assert "a value in a comment is not a value" "$(force_push)" ask 0 "$H_BOOL_COMMENT"
+
+# A comment after a table header is legal TOML. The awk header match anchored
+# on end-of-line, so the whole [behavior] table went unseen and BOTH keys fell
+# back to their defaults. Stricter than the file, but still not the file.
+H_HEADER_COMMENT=$(mkhome '[behavior] # operator note
+ask_mode = "defer"
+defer_scope = "all"')
+assert "comment after [behavior] header: scope" "$(force_push)" empty 0 "$H_HEADER_COMMENT"
+AEGIS_TEST_MOCK_DECISION=ask assert "comment after [behavior] header: mode" \
+  "$(novel)" empty 0 "$H_HEADER_COMMENT"
+
+# Regression from the multi-line-string tracking the awk reader grew to fix a
+# different divergence: a bare `# """` comment contains an odd number of `"""`
+# runs, so the reader believed a multi-line string had opened and ignored the
+# whole rest of the file.
+H_HASH_TRIPLE=$(mkhome '[behavior]
+ask_mode = "defer"
+# """ a comment that looks like a heredoc
+defer_scope = "all"')
+assert "a # \"\"\" comment opens nothing" "$(force_push)" empty 0 "$H_HASH_TRIPLE"
+
+# TOML literal strings are single-quoted. The awk reader only ever looked for
+# a double-quoted value, so this key was invisible to it.
+H_LITERAL=$(mkhome "[behavior]
+ask_mode = \"defer\"
+defer_scope = 'all'")
+assert "literal (single-quoted) string value" "$(force_push)" empty 0 "$H_LITERAL"
+
+# Control, and the reason multi-line tracking was added at all: defer_scope
+# here is string CONTENT, not a setting, and must not be read as one.
+H_MULTILINE=$(mkhome '[behavior]
+ask_mode = "defer"
+note = """
+defer_scope = "all"
+"""')
+assert "config inside a multi-line string is content" "$(force_push)" ask 0 "$H_MULTILINE"
+
+# The parity property itself, asserted directly instead of through a decision:
+# whatever the shell layers act on must be what classifier/rules.py computes
+# for the same input. Both sides are the same tomllib loader now, so these
+# cases are a structural guard -- they fail the moment anyone reintroduces a
+# second reader on either side.
+echo "--- parity: shell resolver == classifier/rules.py ---"
+REPO="$DIR/../.."
+# shellcheck source=../../lib/ask-mode.sh
+. "$REPO/lib/ask-mode.sh"
+PYBIN="$REPO/.venv/bin/python3"
+[ -x "$PYBIN" ] || PYBIN=python3
+
+record() { # $1 name, $2 got, $3 want
+  local got want
+  got=$(printf '%s' "$2" | tr '\t' '/')
+  want=$(printf '%s' "$3" | tr '\t' '/')
+  if [ "$got" = "$want" ]; then
+    PASS=$((PASS+1))
+    printf 'ok   %-52s %s\n' "$1" "$got"
+  else
+    FAIL=$((FAIL+1))
+    FAILS+=("$1: want $want, got $got")
+    printf 'FAIL %-52s want=%s got=%s\n' "$1" "$want" "$got"
+  fi
+}
+
+parity() { # $1 name, $2 HOME, $3 cwd
+  local sh py
+  sh=$(export HOME="$2"; aegis_resolve_behavior "$3")
+  py=$(export HOME="$2"; env PYTHONPATH="$REPO" "$PYBIN" -P -c '
+import sys
+from classifier import rules
+cfg = rules.load_config(sys.argv[1] or None)
+sys.stdout.write(cfg.ask_mode + "\t" + cfg.defer_scope + "\n")' "$3" 2>/dev/null)
+  record "$1" "$sh" "$py"
+}
+
+parity "parity: bool with \"all\" in a comment" "$H_BOOL_COMMENT"   "$PLAIN_CWD"
+parity "parity: comment after table header"    "$H_HEADER_COMMENT" "$PLAIN_CWD"
+parity "parity: bare # \"\"\" comment"         "$H_HASH_TRIPLE"    "$PLAIN_CWD"
+parity "parity: literal string value"          "$H_LITERAL"        "$PLAIN_CWD"
+parity "parity: multi-line string content"     "$H_MULTILINE"      "$PLAIN_CWD"
+parity "parity: no config anywhere"            "$H_PROMPT"         "$PLAIN_CWD"
+parity "parity: project tries to loosen"       "$H_DEFER_CLS"      "$CWD_WANTS_ALL"
+parity "parity: project ratchets tighter"      "$H_DEFER_ALL"      "$CWD_WANTS_STRICT"
+
+# ONE READ. orchestrator.sh takes both keys from a single call so that a
+# config edit landing mid-resolution cannot combine the ask_mode of one
+# version of the file with the defer_scope of another and synthesize a
+# defer/all pair that never existed on disk.
+echo "--- one read: both keys from a single resolution ---"
+record "both keys come from one resolution" \
+  "$(export HOME="$H_DEFER_ALL"; aegis_resolve_behavior "$PLAIN_CWD")" \
+  "$(printf 'defer\tall')"
+record "the ratchet applies to the pair" \
+  "$(export HOME="$H_DEFER_ALL"; aegis_resolve_behavior "$CWD_WANTS_STRICT")" \
+  "$(printf 'prompt\tclassifier')"
+
+# FAIL SAFE. Reading the config now costs a python3 spawn, so it can fail in
+# ways awk could not. Every one of those failures must land on the STRICTER
+# value of each setting. Guessing defer/all on error would disarm every
+# deterministic tripwire exactly when Aegis is least sure of itself, and
+# unlike a spurious prompt that failure is invisible.
+echo "--- fail safe: an unusable parse resolves strict ---"
+ORPHAN=$(mktemp -d); TMPDIRS+=("$ORPHAN")
+mkdir -p "$ORPHAN/lib"
+cp "$REPO/lib/ask-mode.sh" "$ORPHAN/lib/ask-mode.sh"
+
+# Copied out of the install tree: classifier.rules is not importable, so the
+# one parser is unreachable even though python3 itself runs.
+record "parser unreachable resolves strict" \
+  "$(export HOME="$H_DEFER_ALL"
+     . "$ORPHAN/lib/ask-mode.sh"
+     aegis_resolve_behavior "$PLAIN_CWD")" \
+  "$(printf 'prompt\tclassifier')"
+
+# No interpreter at all.
+record "missing python3 resolves strict" \
+  "$(export HOME="$H_DEFER_ALL"
+     . "$ORPHAN/lib/ask-mode.sh"
+     export PATH="$ORPHAN/no-such-bin"
+     aegis_resolve_behavior "$PLAIN_CWD")" \
+  "$(printf 'prompt\tclassifier')"
+
 echo "----"
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" = 0 ] || { printf '  %s\n' "${FAILS[@]}" >&2; exit 1; }

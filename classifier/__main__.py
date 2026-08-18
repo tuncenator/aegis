@@ -53,7 +53,17 @@ def main() -> int:
 
     session_id = payload.get("session_id", "unknown")
     cwd = payload.get("cwd")
-    cfg = rules.load_config(cwd)
+    # Config loading runs before any verdict is surfaced, so an exception
+    # here exits 1 with empty stdout -- which Claude Code reads as an ignored
+    # hook error, silently turning a configured hard block into a pass. That
+    # is reachable from the repo the agent has open, via <cwd>/.aegis: a
+    # scalar where a table belongs, or a file of arbitrary bytes. rules.py
+    # degrades every malformed layer to safe defaults on its own; this is the
+    # backstop for the one thing it cannot catch, a bug in itself.
+    try:
+        cfg = rules.load_config(cwd)
+    except Exception:
+        cfg = rules.default_config()
 
     sess = state.load(session_id)
     if not sess.enabled:

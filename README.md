@@ -139,10 +139,21 @@ setting toward its stricter value. Everything else in it is ignored.
 
 | Table | Project may set |
 |---|---|
-| `[context]` | all keys |
+| `[context]` | `include_claude_md = false`, `last_user_messages` (may only be *raised*), `claude_md_max_tokens` (may only be *lowered*) |
 | `[rules]` | `snapshot_ttl_days` |
 | `[behavior]` | `ask_mode = "prompt"`, `defer_scope = "classifier"`, `hard_deny_action = "block"` |
 | `[classifier]`, `[counters]`, `[environment]`, `[logging]`, `[state]` | nothing |
+
+`[context]` used to be project-settable outright, on the reasoning that more
+context can only help the classifier. Two of its keys do the opposite.
+`include_claude_md` turned on by a project feeds that repo's own `CLAUDE.md`
+-- prose the repo controls -- into the prompt of the model deciding whether
+to allow the call, so it is a prompt-injection channel into the gate itself;
+only you can opt in, a project may only opt out. `last_user_messages` set to
+`0` would blind the classifier to the transcript where you already said "do
+not push", so a project may only ask for more of your own words.
+`claude_md_max_tokens` caps how much repo-controlled text reaches the prompt,
+so a project may only lower it.
 
 `<repo>/.aegis/hard-ask.toml` follows the same principle: it can only *add*
 ASK patterns, never remove one.

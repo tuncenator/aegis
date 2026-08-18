@@ -18,7 +18,12 @@ case "$TOOL" in
   *) exit 0 ;;
 esac
 
-PATH_RAW=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+# Edit and Write name the target `file_path`; NotebookEdit names it
+# `notebook_path`. Reading only `file_path` meant NotebookEdit was listed in
+# the case above but never had a path to test, so every notebook write fell
+# straight through this entire layer -- .git, .ssh, /etc and the Aegis install
+# tree alike, not just the Aegis rules below. Take whichever key is present.
+PATH_RAW=$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')
 [ -z "$PATH_RAW" ] && exit 0
 
 # Expand ~ for matching.

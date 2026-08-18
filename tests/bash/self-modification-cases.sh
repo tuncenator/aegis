@@ -70,6 +70,45 @@ for p in "${paths_none[@]}"; do
   check NONE "$got" "Edit $p"
 done
 
+echo "--- notebook writes (lib/protected-paths.sh, notebook_path key) ---"
+# NotebookEdit hands its target over as notebook_path; only Edit and Write use
+# file_path. protected-paths.sh listed NotebookEdit in its tool filter but read
+# file_path alone, so a notebook write arrived with no path to test and fell
+# through the whole layer -- .git, /etc and $HOME dotfiles included, not just
+# the Aegis rules. These cases pin the key that actually arrives.
+for p in "${paths_ask[@]}"; do
+  out=$(jq -nc --arg p "$p" '{tool_name:"NotebookEdit",tool_input:{notebook_path:$p}}' \
+        | "$LIB/protected-paths.sh" 2>/dev/null)
+  [ -n "$out" ] && got=ASK || got=NONE
+  check ASK "$got" "NotebookEdit(notebook_path) $p"
+done
+for p in "${paths_none[@]}"; do
+  out=$(jq -nc --arg p "$p" '{tool_name:"NotebookEdit",tool_input:{notebook_path:$p}}' \
+        | "$LIB/protected-paths.sh" 2>/dev/null)
+  [ -n "$out" ] && got=ASK || got=NONE
+  check NONE "$got" "NotebookEdit(notebook_path) $p"
+done
+# The bypass was never Aegis-specific, so cover a non-Aegis protected path too.
+for p in "$HOME/.ssh/NOSUCHFILE.ipynb" "/etc/NOSUCHFILE.ipynb" "$PWD/.git/NOSUCHFILE.ipynb"; do
+  out=$(jq -nc --arg p "$p" '{tool_name:"NotebookEdit",tool_input:{notebook_path:$p}}' \
+        | "$LIB/protected-paths.sh" 2>/dev/null)
+  [ -n "$out" ] && got=ASK || got=NONE
+  check ASK "$got" "NotebookEdit(notebook_path) $p"
+done
+# file_path on NotebookEdit must keep working: the fix reads whichever key is
+# present rather than swapping one hard-coded key for another.
+out=$(jq -nc --arg p "$AEGIS_ROOT/lib/NOSUCHFILE.sh" \
+        '{tool_name:"NotebookEdit",tool_input:{file_path:$p}}' \
+      | "$LIB/protected-paths.sh" 2>/dev/null)
+[ -n "$out" ] && got=ASK || got=NONE
+check ASK "$got" "NotebookEdit(file_path) $AEGIS_ROOT/lib/NOSUCHFILE.sh"
+# A tool this layer does not gate stays silent even carrying a protected path.
+out=$(jq -nc --arg p "$AEGIS_ROOT/lib/NOSUCHFILE.sh" \
+        '{tool_name:"Read",tool_input:{notebook_path:$p}}' \
+      | "$LIB/protected-paths.sh" 2>/dev/null)
+[ -n "$out" ] && got=ASK || got=NONE
+check NONE "$got" "Read(notebook_path) $AEGIS_ROOT/lib/NOSUCHFILE.sh"
+
 echo "----"
 echo "PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" = 0 ] || { printf '  %s\n' "${FAILS[@]}" >&2; exit 1; }

@@ -15,10 +15,16 @@ reproduced before being fixed and are pinned by tests.
   dropped every deterministic tripwire, and `[environment] trusted_domains`
   widened the exfiltration boundary. A project may now only *ratchet* a
   setting toward its stricter value (`ask_mode = "prompt"`,
-  `defer_scope = "classifier"`, `hard_deny_action = "block"`) plus set
-  `[context]` and `snapshot_ttl_days`; every other table is global-only. See
-  `PROJECT_KEYS` / `PROJECT_RATCHETS` in `classifier/rules.py`, mirrored in
-  `lib/ask-mode.sh` because the two resolvers must agree.
+  `defer_scope = "classifier"`, `hard_deny_action = "block"`,
+  `include_claude_md = false`), move a numeric limit in the safe direction
+  only (`last_user_messages` up, `claude_md_max_tokens` down), or set
+  `snapshot_ttl_days`, which gates nothing; every other table is global-only.
+  `[context]` is no longer settable outright: a project that turned on
+  `include_claude_md` was feeding its own repo-controlled `CLAUDE.md` into
+  the prompt of the model gating its tool calls. See `PROJECT_KEYS` /
+  `PROJECT_RATCHETS` / `PROJECT_LIMITS` in `classifier/rules.py` -- now the
+  single definition, since `lib/ask-mode.sh` resolves through that same
+  loader rather than parsing the config a second time.
 - **`[logging] diag_path` was an arbitrary-file rename-and-overwrite
   primitive.** A project pointing it at any user-writable file, with
   `max_bytes = 1`, made the next tool call rename that file to `<name>.1`

@@ -7,7 +7,10 @@ content. It used to merge with the same authority as the operator's own
 of the thing Aegis exists to do.
 
 These tests pin the rule: a project may RATCHET a setting toward its stricter
-value and may set context knobs, and nothing else in the file has any effect.
+value, and nothing else in the file has any effect. They also pin the other
+half of the contract -- that a malformed project file is INERT rather than
+fatal, because config loading runs before the verdict is surfaced and an
+exception there exits the hook 1, which Claude Code ignores.
 """
 import json
 import os
@@ -24,17 +27,28 @@ REPO = Path(__file__).resolve().parent.parent.parent
 
 @pytest.fixture
 def layers(tmp_path, monkeypatch):
-    """Return (write_global, write_project, load) for a two-layer config."""
+    """Return (write_global, write_project, load) for a two-layer config.
+
+    Either writer takes str or bytes; the bytes form is how the undecodable
+    -file cases below are expressed, since a config path an attacker controls
+    need not hold UTF-8 at all.
+    """
     glob = tmp_path / "global.toml"
     proj = tmp_path / "proj"
     (proj / ".aegis").mkdir(parents=True)
     monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", glob)
 
+    def _write(path, body):
+        if isinstance(body, bytes):
+            path.write_bytes(body)
+        else:
+            path.write_text(body)
+
     def write_global(body):
-        glob.write_text(body)
+        _write(glob, body)
 
     def write_project(body):
-        (proj / ".aegis" / "aegis.toml").write_text(body)
+        _write(proj / ".aegis" / "aegis.toml", body)
 
     def load():
         return rules.load_config(str(proj))
@@ -113,14 +127,90 @@ def test_project_may_tighten_but_not_loosen(layers, key, loose, strict):
     assert getattr(load(), key) == strict, "project could not tighten"
 
 
-def test_project_may_set_context_knobs(layers):
+# --- the context ratchet ---------------------------------------------------
+# [context] used to be settable outright, on the reasoning that context only
+# ever helps the classifier. Two of its keys do the opposite in a project's
+# hands, so they ratchet too: toward less repo-controlled text in the prompt
+# and more of the user's own words.
+
+def test_project_cannot_turn_on_claude_md_inclusion(layers):
+    """The prompt-injection surface: a project turning this on feeds its own
+    CLAUDE.md -- prose the repo controls -- into the prompt of the model that
+    is deciding whether to allow the tool call."""
+    write_global, write_project, load = layers
+    write_global('[context]\ninclude_claude_md = false\n')
+    write_project('[context]\ninclude_claude_md = true\n')
+    assert load().include_claude_md is False
+
+
+def test_project_may_turn_off_claude_md_inclusion(layers):
+    """False is the safe end, so that direction is honoured."""
+    write_global, write_project, load = layers
+    write_global('[context]\ninclude_claude_md = true\n')
+    write_project('[context]\ninclude_claude_md = false\n')
+    assert load().include_claude_md is False
+
+
+def test_project_cannot_starve_the_classifier_of_transcript(layers):
+    """0 strips the messages where the user already said 'do not push'."""
+    write_global, write_project, load = layers
+    write_global('[context]\nlast_user_messages = 10\n')
+    write_project('[context]\nlast_user_messages = 0\n')
+    assert load().last_user_messages == 10
+
+
+def test_project_may_ask_for_more_transcript(layers):
+    write_global, write_project, load = layers
+    write_global('[context]\nlast_user_messages = 10\n')
+    write_project('[context]\nlast_user_messages = 25\n')
+    assert load().last_user_messages == 25
+
+
+def test_project_cannot_raise_the_claude_md_cap(layers):
+    """The cap bounds how much repo-controlled text reaches the prompt, so a
+    project may only tighten it."""
+    write_global, write_project, load = layers
+    write_global('[context]\nclaude_md_max_tokens = 4000\n')
+    write_project('[context]\nclaude_md_max_tokens = 100000\n')
+    assert load().claude_md_max_tokens == 4000
+
+
+def test_project_may_lower_the_claude_md_cap(layers):
+    write_global, write_project, load = layers
+    write_global('[context]\nclaude_md_max_tokens = 4000\n')
+    write_project('[context]\nclaude_md_max_tokens = 100\n')
+    assert load().claude_md_max_tokens == 100
+
+
+def test_project_may_set_the_snapshot_ttl(layers):
+    """The one key still settable outright: `aegis status` prints a staleness
+    flag from it and no decision reads it."""
     _, write_project, load = layers
-    write_project('[context]\nlast_user_messages = 3\ninclude_claude_md = false\n'
-                  'claude_md_max_tokens = 100\n')
+    write_project('[rules]\nsnapshot_ttl_days = 3\n')
+    assert load().snapshot_ttl_days == 3
+
+
+def test_a_project_file_that_says_nothing_changes_nothing(layers):
+    """The ratchets are evaluated on every load, against whatever the global
+    layer left in place. A key the project never mentions must come out
+    indistinguishable from one it set to the value already in force."""
+    write_global, write_project, load = layers
+    write_global('[context]\ninclude_claude_md = true\nlast_user_messages = 5\n'
+                 'claude_md_max_tokens = 200\n')
+    write_project('# this project has opinions about nothing\n')
     cfg = load()
-    assert cfg.last_user_messages == 3
-    assert cfg.include_claude_md is False
-    assert cfg.claude_md_max_tokens == 100
+    assert cfg.include_claude_md is True
+    assert cfg.last_user_messages == 5
+    assert cfg.claude_md_max_tokens == 200
+
+
+def test_wrong_typed_project_context_values_do_not_clobber_global(layers):
+    write_global, write_project, load = layers
+    write_global('[context]\ninclude_claude_md = true\nlast_user_messages = 5\n')
+    write_project('[context]\ninclude_claude_md = "yes"\nlast_user_messages = "many"\n')
+    cfg = load()
+    assert cfg.include_claude_md is True
+    assert cfg.last_user_messages == 5
 
 
 def test_global_layer_keeps_full_authority(layers):
@@ -163,6 +253,93 @@ def test_empty_chain_does_not_erase_the_default(layers):
     assert load().classifier_chain
 
 
+# --- a malformed config must be inert, never fatal -------------------------
+# Type-checking values was only half the job: the SHAPE of a config could
+# still raise. `context = 1` is legal TOML (a bare key, not a table), so
+# raw.get("context") returned an int and the .get() on it raised
+# AttributeError; a project file of arbitrary bytes raised UnicodeDecodeError
+# out of Path.read_text. Both escaped load_config, which runs before the
+# verdict is surfaced, so the hook exited 1 with empty stdout -- an ignored
+# hook error, i.e. the whole gate silently disappearing.
+
+MALFORMED = [
+    pytest.param("context = 1\n", id="scalar-where-context-table-goes"),
+    pytest.param("behavior = 1\n", id="scalar-where-behavior-table-goes"),
+    pytest.param("rules = 1\n", id="scalar-where-rules-table-goes"),
+    pytest.param("classifier = 1\n", id="scalar-where-classifier-table-goes"),
+    pytest.param("logging = 1\ncounters = 1\nstate = 1\nenvironment = 1\n",
+                 id="scalars-where-the-trusted-tables-go"),
+    pytest.param("[classifier]\nchain = [ 1, 2 ]\n", id="chain-of-scalars"),
+    pytest.param('[classifier]\nchain = [ { model = "m" } ]\n',
+                 id="chain-entry-without-provider"),
+    pytest.param("[behavior\n", id="truncated-table-header"),
+    pytest.param(b"\xff\xfe[context]\n", id="undecodable-bytes"),
+    pytest.param(b"\x00\x00\x00\x00", id="nul-bytes"),
+]
+
+
+@pytest.mark.parametrize("body", MALFORMED)
+def test_malformed_project_config_is_ignored_not_fatal(layers, body):
+    """An untrusted file is the one an attacker can shape deliberately, so a
+    bad one must cost the project its ratchet and nothing else: the operator's
+    own layer has to survive it intact."""
+    write_global, write_project, load = layers
+    write_global('[behavior]\nhard_deny_action = "block"\n\n'
+                 '[counters]\nconsecutive_deny_limit = 7\n')
+    write_project(body)
+    cfg = load()  # must not raise
+    assert cfg.hard_deny_action == "block", "global layer lost to a bad project file"
+    assert cfg.consecutive_deny_limit == 7
+    assert cfg.classifier_chain
+
+
+@pytest.mark.parametrize("body", MALFORMED)
+def test_malformed_global_config_degrades_to_defaults(layers, body):
+    """Operator error rather than an attack, but it must still not raise."""
+    write_global, _, load = layers
+    write_global(body)
+    cfg = load()  # must not raise
+    assert cfg.classifier_chain
+    assert cfg.on_exhaustion == "ask"
+    assert cfg.ask_mode == "prompt"
+
+
+def test_a_project_layer_that_explodes_is_dropped_whole(layers, monkeypatch):
+    """Backstop for a merge bug rather than a config shape: a half-merged
+    project layer is not allowed to exist, so the merge runs on a copy and
+    only replaces the config once it has finished."""
+    write_global, write_project, load = layers
+    write_global('[behavior]\nhard_deny_action = "block"\n')
+    write_project('[context]\nlast_user_messages = 25\n')
+    real = rules._apply_layer
+
+    def boom(cfg, raw, trusted):
+        if not trusted:
+            cfg.last_user_messages = 25   # half-merged, then dies
+            raise RuntimeError("merge bug")
+        return real(cfg, raw, trusted)
+
+    monkeypatch.setattr(rules, "_apply_layer", boom)
+    cfg = load()
+    assert cfg.hard_deny_action == "block"
+    assert cfg.last_user_messages == 10, "a half-merged project layer survived"
+
+
+def test_a_global_layer_that_explodes_falls_back_to_defaults(layers, monkeypatch):
+    """Merge order decides what a half-merged global config keeps, so the
+    partial result is discarded: `on_exhaustion = "allow"` must not be able
+    to outlive the hardening that was meant to follow it."""
+    write_global, _, load = layers
+    write_global('[classifier]\non_exhaustion = "allow"\n')
+
+    def boom(cfg, raw, trusted):
+        cfg.on_exhaustion = "allow"
+        raise RuntimeError("merge bug")
+
+    monkeypatch.setattr(rules, "_apply_layer", boom)
+    assert load().on_exhaustion == "ask", "a half-merged global config survived"
+
+
 # --- end to end ------------------------------------------------------------
 
 def _run_classifier(cwd, home, payload):
@@ -191,6 +368,43 @@ def test_malformed_max_bytes_still_hard_blocks(tmp_path):
         "session_id": "trust-e2e-1", "transcript_path": "/nonexistent.jsonl",
         "cwd": str(proj), "tool_name": "Bash", "tool_input": {"command": "frobnicate"}})
     assert r.returncode == 2, f"hard block degraded to rc={r.returncode}: {r.stderr}"
+
+
+def _blocking_home(tmp_path):
+    """A global config whose chain always exhausts to a hard block, so any
+    rc other than 2 from _run_classifier means the gate was lost."""
+    home = tmp_path / "home"
+    (home / ".config" / "aegis").mkdir(parents=True)
+    (home / ".config" / "aegis" / "aegis.toml").write_text(
+        '[classifier]\n'
+        'chain = [ { provider = "none", model = "unused", retries = 1, timeout_s = 1 } ]\n'
+        'on_exhaustion = "deny"\n\n'
+        '[behavior]\nhard_deny_action = "block"\n')
+    return home
+
+
+@pytest.mark.parametrize("body", [
+    pytest.param(None, id="baseline-no-project-config"),
+    pytest.param("context = 1\n", id="scalar-where-context-table-goes"),
+    pytest.param("behavior = 1\n", id="scalar-where-behavior-table-goes"),
+    pytest.param(b"\xff\xfe[context]\n", id="undecodable-bytes"),
+])
+def test_malformed_project_config_still_hard_blocks(tmp_path, body):
+    """The fail-open, end to end. rc=1 is a traceback Claude Code reads as an
+    ignored hook error, so a repo could delete the operator's hard block by
+    checking in three bytes of broken TOML."""
+    home = _blocking_home(tmp_path)
+    proj = tmp_path / "proj"
+    (proj / ".aegis").mkdir(parents=True)
+    if body is not None:
+        p = proj / ".aegis" / "aegis.toml"
+        p.write_bytes(body) if isinstance(body, bytes) else p.write_text(body)
+
+    r = _run_classifier(proj, home, {
+        "session_id": "trust-e2e-malformed", "transcript_path": "/nonexistent.jsonl",
+        "cwd": str(proj), "tool_name": "Bash", "tool_input": {"command": "frobnicate"}})
+    assert r.returncode == 2, f"hard block degraded to rc={r.returncode}: {r.stderr}"
+    assert r.stdout == "", "rc=2 must carry no permission decision on stdout"
 
 
 def test_project_config_cannot_overwrite_the_global_config(tmp_path):
