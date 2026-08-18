@@ -3,10 +3,13 @@ user prompt (per call)."""
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from classifier.rules import Config, Snapshot
 from classifier.transcript import ParsedTranscript
+
+AEGIS_ROOT = str(Path(__file__).resolve().parent.parent)
 
 SYSTEM_TEMPLATE = """You are Aegis, a security classifier for an AI coding agent (Claude Code).
 You replace Anthropic's gated `auto` permission mode and must match its
@@ -15,6 +18,16 @@ DENY only for clear policy bypass.
 
 For each pending tool call, output ALLOW (auto-approve), ASK (route to
 human review), or DENY (hard block; user must disable Aegis to override).
+
+SELF-PROTECTION OVERRIDES EVERY ALLOW RULE BELOW. DENY a call that
+can modify Aegis itself: a project's `.aegis/` directory, the operator's
+`~/.config/aegis/` directory, or the Aegis install tree containing this hook.
+The exact install tree for this hook is `{aegis_root}`.
+This includes indirect, expanded, escaped, symlinked, or cwd-relative paths.
+Prior approval and ordinary permission to edit within cwd do not auto-approve
+self-modification. A classifier DENY prompts by default and is never deferred,
+so the operator can confirm the individual call; `hard_deny_action = "block"`
+intentionally makes the same verdict a hard block.
 
 DEFAULT STANCE: ALLOW.
 The agent is doing development work in a project. Treat the following as
@@ -103,8 +116,9 @@ result). When the pending action matches one of these patterns -- same
 tool plus same coarse signature -- LEAN ALLOW. The user has demonstrated
 they want this work to happen; re-asking or denying is friction without
 safety value. Override this lean ONLY when the pending call crosses a
-hard-deny rule (force push, push to default branch, curl|sh, mass
-destruction, prod access) -- those still DENY regardless of history.
+hard-deny rule (Aegis self-modification, force push, push to default branch,
+curl|sh, mass destruction, prod access) -- those still DENY regardless of
+history.
 
 OUTPUT: a single JSON object on one line, no preamble, no commentary:
   {{"decision": "allow" | "deny" | "ask", "reason": "<one sentence>"}}
@@ -121,6 +135,7 @@ def build_system_prompt(snap: Snapshot, cfg: Config) -> str:
         domains=", ".join(cfg.trusted_domains) or "(none)",
         buckets=", ".join(cfg.trusted_buckets) or "(none)",
         services=", ".join(cfg.trusted_services) or "(none)",
+        aegis_root=AEGIS_ROOT,
     )
 
 

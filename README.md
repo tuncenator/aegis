@@ -176,13 +176,22 @@ used to raise inside the decision log writer, which runs *before* the verdict
 is surfaced, so a configured hard block exited 1 (an ignored hook error)
 instead of 2.
 
-Writes to Aegis's own config and install tree are gated too, by
+Writes to Aegis's own config and install tree are gated by
 `lib/bash-hard-ask.sh` for Bash and `lib/protected-paths.sh` for
-Edit/Write. `lib/bash-gatekeeper.sh` matches on the executable name and never
-inspects redirections, so it auto-allowed things like
-`printf ... > .aegis/aegis.toml`; the hard-ask layer runs first, which is what
-makes the gate stick. It matches on command text, so a command that merely
-mentions those paths also asks. That is why it asks rather than denies.
+Edit/Write/NotebookEdit. The Bash side matches command *text*, so it catches
+every plain spelling but cannot catch every obfuscated one; the classifier
+carries a self-protection DENY rule for anything that reaches it, and
+`tests/bash/corpus/aegis-self-write-bypasses.txt` pins the accepted residual
+with the measurement behind accepting it. Edit/Write paths are normalized
+against their payload cwd and resolved through existing symlinks.
+
+Closing that residual completely was tried and rejected on cost: restricting
+the hard-allow layer to proven readers caught all of it, and dropped the
+hard-allow rate on 1854 real commands from 75% to 5%, moving 950 of every
+1000 Bash calls onto the LLM classifier. The blast radius did not justify it.
+An attacker who lands one of those forms disables Aegis, and Claude Code's
+native auto mode still gates the session, which is what `ask_mode = "defer"`
+already falls through to.
 
 ### `ask_mode`: prompt or defer
 
@@ -370,6 +379,7 @@ tests/bash/run.sh                                       # bash corpus
 AEGIS_TEST_MOCK_DECISION=ask tests/bash/orchestrator-cases.sh
 tests/bash/ask-mode-cases.sh                            # ask_mode, defer_scope, project ratchet
 tests/bash/self-modification-cases.sh                   # writes to Aegis config/install tree
+tests/bash/protected-path-normalization-cases.sh        # relative, normalized, symlinked paths
 ```
 
 ## Spec

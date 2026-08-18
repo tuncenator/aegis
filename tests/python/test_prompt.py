@@ -126,6 +126,18 @@ def test_system_prompt_biases_ask_over_deny_on_pattern_match():
     assert "substring" in sp
 
 
+def test_system_prompt_denies_aegis_self_modification():
+    sp = prompt.build_system_prompt(_snap(), _cfg())
+    assert "SELF-PROTECTION OVERRIDES EVERY ALLOW RULE" in sp
+    assert "DENY a call" in sp
+    assert ".aegis/" in sp
+    assert "~/.config/aegis/" in sp
+    assert prompt.AEGIS_ROOT in sp
+    assert "cwd-relative" in sp
+    assert "Prior approval" in sp
+    assert "never deferred" in sp
+
+
 def test_user_prompt_lists_prior_approvals_when_present():
     parsed = ParsedTranscript(
         user_messages=["go"],

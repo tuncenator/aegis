@@ -38,16 +38,27 @@ reproduced before being fixed and are pinned by tests.
   ignored hook error -- instead of 2. Every config value is now type-checked,
   `on_exhaustion` is validated against `allow|deny|ask`, and both the diag
   and prune calls are wrapped so diagnostics can never change a decision.
-- **Writes to Aegis's own config and install tree now ask.**
-  `lib/bash-gatekeeper.sh` matches on the executable name and never inspects
-  redirections, so it handed an unconditional ALLOW to
-  `printf ... > .aegis/aegis.toml`, letting an agent switch off the very
-  tripwires the `defer_scope = "classifier"` default preserves. Covered for
-  Bash in `lib/bash-hard-ask.sh` (redirects in every operator form, including
-  `>|` and fd-prefixed, plus tee/sed -i/cp/mv/rm/dd/chmod/truncate) and for
-  Edit/Write in `lib/protected-paths.sh`. Reads are untouched. It matches on
-  command text, so a command that merely mentions those paths also asks,
-  which is why it asks rather than denies.
+- **Self-write gating widened, with a measured limit.** The lexical
+  protected-path matcher was evaded by quote and backslash splits, variables,
+  globs, dot segments, cwd-relative paths, symlinks, and writer modes such as
+  `git diff --output`. Fixed here: `git diff/show --output`, redirects issued
+  from inside a protected tree (where the cwd supplies the rest of the path,
+  the shortest and most natural way to write those files), and Edit/Write
+  paths, which are now normalized against their payload cwd and resolved
+  through existing symlinks. The classifier also gained an overriding
+  self-protection DENY rule for anything that reaches layer 4.
+
+  Twelve obfuscated forms remain uncaught, pinned as RESIDUAL in
+  `tests/bash/corpus/aegis-self-write-bypasses.txt` with the reasoning. The
+  complete fix was built and measured: restricting `lib/bash-gatekeeper.sh` to
+  hard-allow only proven readers caught all twelve, and dropped the hard-allow
+  rate on 1854 real commands from 75% to 5%. That puts 950 of every 1000 Bash
+  calls on the LLM classifier, roughly 4x the model spend and 16 extra minutes
+  of latency per 1000 calls, permanently. It was reverted on blast radius: an
+  attacker who lands one of those forms disables Aegis, and Claude Code's
+  native auto mode still gates the session, which is exactly what
+  `ask_mode = "defer"` already falls through to. A certain, permanent cost was
+  not worth closing a narrow path whose worst case is the chosen fallback.
 - **The bash config reader no longer reads configuration out of string
   content.** `lib/ask-mode.sh` matched `defer_scope = "all"` inside a
   multi-line TOML string, so the shell layers and Python's `tomllib`

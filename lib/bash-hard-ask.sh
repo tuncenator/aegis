@@ -75,14 +75,17 @@ if echo "$_lower" | grep -qE '(^|[[:space:];|&()`])(git[[:space:]]+(commit|tag|m
 fi
 
 # Writes to Aegis's own configuration or code -- self-modification of the
-# guard. lib/bash-gatekeeper.sh matches on the executable name and does not
-# inspect redirections, so it hands an unconditional ALLOW to things like
+# guard. This is a lexical matcher over command TEXT, and shell syntax has
+# infinitely many equivalent spellings of the same path, so it cannot be
+# complete. What it misses, lib/bash-gatekeeper.sh may auto-allow before the
+# classifier ever sees it; see tests/bash/corpus/aegis-self-write-bypasses.txt
+# for the accepted residual and the reasoning behind accepting it.
+# The bypass this block was written for was an unconditional ALLOW for
 #
 #   printf '%s\n' '[behavior]' 'defer_scope = "all"' > .aegis/aegis.toml
 #
-# which would switch off every deterministic tripwire (including this file)
-# without the classifier ever seeing the policy change. The gatekeeper runs
-# AFTER this layer, so catching it here is what makes it stick.
+# which could switch off every deterministic tripwire without the classifier
+# seeing the policy change.
 #
 # Covered: the project config dir, the global config dir, and the Aegis
 # install tree itself. Reads are untouched; only writes match.
@@ -135,6 +138,27 @@ if echo "$CMD" | grep -qE "$_aegis_redir_op$_aegis_redir_target$_aegis_tail"; th
   ask "redirects into Aegis configuration or install tree"
 fi
 
+# 1b. The same redirect, issued from INSIDE a protected tree. `printf x >
+# lib/bash-denylist.sh` run with cwd at the install root mentions nothing
+# protected -- the working directory supplies the rest of the path -- so
+# clause 1 cannot see it. This is not an obfuscation: it is the shortest and
+# most natural way to write the file, and it was reaching the gatekeeper as a
+# plain allow. When cwd is already inside a protected tree, ANY redirect is
+# worth one keypress.
+if [ -n "${CWD:-}" ]; then
+  _aegis_cwd=$(cd "$CWD" 2>/dev/null && pwd -P) || _aegis_cwd=""
+  case "$_aegis_cwd" in
+    "$AEGIS_ROOT"|"$AEGIS_ROOT"/*|"$HOME/.config/aegis"|"$HOME/.config/aegis"/*)
+      if echo "$CMD" | grep -qE "$_aegis_redir_op"; then
+        ask "redirects while inside the Aegis install tree or config directory"
+      fi
+      ;;
+  esac
+  if [ -d "$CWD/.aegis" ] && echo "$CMD" | grep -qE "$_aegis_redir_op[[:space:]]*[\"']?\.aegis/"; then
+    ask "redirects into the project Aegis config directory"
+  fi
+fi
+
 # 2 and 3. Walk the command segment by segment. Skipped entirely unless the
 # command mentions Aegis somewhere -- almost none do, and the walk is not free.
 if echo "$CMD" | grep -qE '(\.aegis|\.config/aegis|'"$_aegis_root_re"')'; then
@@ -144,8 +168,15 @@ if echo "$CMD" | grep -qE '(\.aegis|\.config/aegis|'"$_aegis_root_re"')'; then
   # (-delete, -exec), `sort` (-o), `xxd` (-r out) and `echo`/`printf`, whose
   # entire role in the bypass is to feed a redirect.
   _aegis_readers='cat|bat|less|more|head|tail|nl|tac|rev|grep|egrep|fgrep|rg|ag|ack|ls|tree|stat|file|wc|du|diff|cmp|comm|cksum|md5sum|sha1sum|sha224sum|sha256sum|sha384sum|sha512sum|od|hexdump|strings|realpath|readlink|basename|dirname|jq|test'
-  # git as a whole writes; a handful of its subcommands do not.
+  # git as a whole writes; a handful of its subcommands do not. Except that
+  # `git diff` and `git show` DO write when handed --output=FILE, which
+  # truncates and overwrites the target -- so the flag disqualifies the whole
+  # segment from reader status regardless of subcommand.
   _aegis_git_readers='status|diff|log|show|blame|ls-files|grep|cat-file|rev-parse|describe|shortlog|reflog'
+  # Anchored on a word boundary rather than starting with `-`: a pattern
+  # beginning with `--` is read by grep as an option, not a pattern, so the
+  # unanchored form silently never matched.
+  _aegis_git_writing_flags='(^|[[:space:]])--output([=[:space:]]|$)'
 
   _aegis_writer_names=0  # a segment that can write names a protected path
   _aegis_cd_into=0       # a segment cd's into a protected directory
@@ -170,7 +201,8 @@ if echo "$CMD" | grep -qE '(\.aegis|\.config/aegis|'"$_aegis_root_re"')'; then
     _reader=0
     if [ "$_w" = git ]; then
       _sub=$(printf '%s\n' "$_seg" | sed -E 's/^[[:space:]]*//' | awk '{print $2}')
-      if printf '%s\n' "$_sub" | grep -qE "^($_aegis_git_readers)$"; then _reader=1; fi
+      if printf '%s\n' "$_sub" | grep -qE "^($_aegis_git_readers)$" &&
+         ! printf '%s\n' "$_seg" | grep -qE "$_aegis_git_writing_flags"; then _reader=1; fi
     elif printf '%s\n' "$_w" | grep -qE "^($_aegis_readers)$"; then
       _reader=1
     fi

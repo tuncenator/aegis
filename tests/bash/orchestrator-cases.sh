@@ -63,9 +63,10 @@ assert "Task tool"  '{"tool_name":"Task","tool_input":{"description":"x","prompt
 assert "WebFetch"   '{"tool_name":"WebFetch","tool_input":{"url":"https://example.com"}}'  allow 0
 assert "WebSearch"  '{"tool_name":"WebSearch","tool_input":{"query":"foo"}}'              allow 0
 
-# Bash safe command: gatekeeper allow.
+# Bash direct reader: gatekeeper allow. Git is intentionally classifier-routed
+# because git has write modes and output flags.
 assert "ls"           '{"tool_name":"Bash","tool_input":{"command":"ls"}}'           allow 0
-assert "git status"   '{"tool_name":"Bash","tool_input":{"command":"git status"}}'   allow 0
+assert "git status"   '{"tool_name":"Bash","tool_input":{"command":"git status"}}'   "allow|deny|ask" "0|2"
 
 # Bash hard-deny: rm -rf /
 assert "rm -rf /"     '{"tool_name":"Bash","tool_input":{"command":"rm -rf /"}}'     deny  2
