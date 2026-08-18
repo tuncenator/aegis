@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Compatibility
+
+- Added an OpenCode plugin adapter that routes OpenCode permission requests
+  through the existing Aegis orchestrator while keeping the Claude Code plugin
+  path unchanged.
+- Added OpenCode command files and installer symlinks for the global OpenCode
+  plugin and command directories. `install.sh` only creates them when
+  OpenCode is actually present (`command -v opencode`, or an existing
+  `~/.config/opencode`); it never touches that tree otherwise.
+
+### Verification
+
+- Added Node adapter tests for the OpenCode payload mapping, decision mapping,
+  permission config hardening, and plugin hook behavior.
+
 ## 1.1.0 -- 2026-05-20
 
 Adds session memory to the classifier. Aegis used to relitigate every

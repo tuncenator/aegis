@@ -67,6 +67,19 @@ through a directory marketplace; register it once inside Claude Code:
 Then `/reload-plugins` (or restart Claude Code) so the PreToolUse hook
 activates. Verify with `/aegis-status`.
 
+### OpenCode
+
+`install.sh` also symlinks the OpenCode plugin to
+`~/.config/opencode/plugins/aegis.js`, but only when OpenCode is present on
+the machine. Restart OpenCode after install so it loads the plugin. The
+plugin keeps Claude Code compatibility untouched: it normalizes OpenCode
+permission requests into Aegis's existing hook payload, runs
+`orchestrator.sh`, then maps Aegis's allow/ask/deny back to OpenCode.
+
+Project-local copies can use `.opencode/plugins/aegis.js` directly. OpenCode
+commands are available as `.opencode/commands/aegis-status.md`,
+`.opencode/commands/aegis-on.md`, and `.opencode/commands/aegis-off.md`.
+
 ### `Bash` allow rule
 
 `install.sh` offers (interactive, default no) to add `"Bash"` to
@@ -216,6 +229,7 @@ PreToolUse hooks directly to `lib/bash-gatekeeper.sh` and
 ```bash
 uv sync                                                 # python deps
 uv run python -m pytest tests/python/ -v                # python tests
+node --test tests/opencode/*.test.mjs                   # OpenCode adapter tests
 tests/bash/run.sh                                       # bash corpus
 AEGIS_TEST_MOCK_DECISION=ask tests/bash/orchestrator-cases.sh
 tests/bash/ask-mode-cases.sh                            # ask_mode prompt/defer

@@ -82,6 +82,23 @@ else
   echo "note: ~/.local/bin doesn't exist; add $DIR/bin to PATH yourself or 'mkdir ~/.local/bin && rerun'"
 fi
 
+# 4b. OpenCode adapter, only when OpenCode is actually installed. Creating
+# ~/.config/opencode on a machine that has never run OpenCode is litter, and
+# the Claude Code path does not need any of it.
+if command -v opencode >/dev/null 2>&1 || [ -d "$HOME/.config/opencode" ]; then
+  OPENCODE_PLUGIN_DIR="$HOME/.config/opencode/plugins"
+  mkdir -p "$OPENCODE_PLUGIN_DIR"
+  ensure_symlink "$DIR/.opencode/plugins/aegis.js" "$OPENCODE_PLUGIN_DIR/aegis.js" "OpenCode plugin"
+  OPENCODE_COMMAND_DIR="$HOME/.config/opencode/commands"
+  mkdir -p "$OPENCODE_COMMAND_DIR"
+  ensure_symlink "$DIR/.opencode/commands/aegis-status.md" "$OPENCODE_COMMAND_DIR/aegis-status.md" "OpenCode status command"
+  ensure_symlink "$DIR/.opencode/commands/aegis-on.md" "$OPENCODE_COMMAND_DIR/aegis-on.md" "OpenCode on command"
+  ensure_symlink "$DIR/.opencode/commands/aegis-off.md" "$OPENCODE_COMMAND_DIR/aegis-off.md" "OpenCode off command"
+  OPENCODE_INSTALLED=1
+else
+  OPENCODE_INSTALLED=0
+fi
+
 # 5. Write a starter config if missing.
 CONFIG_DIR="$HOME/.config/aegis"
 if [ ! -f "$CONFIG_DIR/aegis.toml" ]; then
@@ -224,3 +241,6 @@ echo "  /plugin marketplace add $DIR"
 echo "  /plugin install aegis@aegis"
 echo
 echo "Then restart Claude Code so the PreToolUse hook activates."
+if [ "${OPENCODE_INSTALLED:-0}" = 1 ]; then
+  echo "For OpenCode, restart opencode so ~/.config/opencode/plugins/aegis.js loads."
+fi
