@@ -74,6 +74,41 @@ if echo "$_lower" | grep -qE '(^|[[:space:];|&()`])(git[[:space:]]+(commit|tag|m
   fi
 fi
 
+# Writes to Aegis's own configuration or code -- self-modification of the
+# guard. lib/bash-gatekeeper.sh matches on the executable name and does not
+# inspect redirections, so it hands an unconditional ALLOW to things like
+#
+#   printf '%s\n' '[behavior]' 'defer_scope = "all"' > .aegis/aegis.toml
+#
+# which would switch off every deterministic tripwire (including this file)
+# without the classifier ever seeing the policy change. The gatekeeper runs
+# AFTER this layer, so catching it here is what makes it stick.
+#
+# Covered: the project config dir, the global config dir, and the Aegis
+# install tree itself. Reads are untouched; only redirects and mutating
+# commands match.
+AEGIS_ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
+_aegis_targets='(\.aegis(/|$)|\.config/aegis(/|$)'"$(printf '|%s' "$(echo "$AEGIS_ROOT" | sed 's/[.[\*^$()+?{|]/\\&/g')")"')'
+
+# 1. Any redirect whose target is one of those paths. The operator forms all
+# count: `>`, `>>`, `>|` (noclobber override), and fd-prefixed `2>` / `&>`.
+# The target may be quoted. Missing `>|` here meant the plain-`>` case was
+# caught while the noclobber form walked straight through.
+if echo "$CMD" | grep -qE '[0-9&]*>>?\|?[[:space:]]*["'"'"']?[^|;&[:space:]"'"'"']*'"$_aegis_targets"; then
+  ask "redirects into Aegis configuration or install tree"
+fi
+# 2. Mutating commands naming one of those paths.
+if echo "$CMD" | grep -qE '(^|[[:space:];|&()`])(tee|cp|mv|rm|ln|install|truncate|touch|chmod|chown|shred)([[:space:]]+-[^[:space:]]+)*[[:space:]]+[^|;&]*'"$_aegis_targets"; then
+  ask "mutating command targets Aegis configuration or install tree"
+fi
+# 3. In-place editors and dd.
+if echo "$CMD" | grep -qE '(^|[[:space:];|&()`])sed[[:space:]]+[^|;&]*-i[^|;&]*'"$_aegis_targets"; then
+  ask "in-place edit of Aegis configuration or install tree"
+fi
+if echo "$CMD" | grep -qE '(^|[[:space:];|&()`])dd[[:space:]]+[^|;&]*of=[^[:space:]]*'"$_aegis_targets"; then
+  ask "dd writes to Aegis configuration or install tree"
+fi
+
 # Project-level patterns from .aegis/hard-ask.toml
 if [ -n "$CWD" ] && [ -f "$CWD/.aegis/hard-ask.toml" ]; then
   while IFS= read -r pat; do

@@ -79,21 +79,37 @@ def record_decision(
 
 
 def prune(ttl_days: int = 14) -> int:
-    """Delete session state files not touched in ttl_days. Returns the count.
+    """Delete stale session state files. Returns the count removed.
 
-    Deleting a session's file is harmless: state.load() rebuilds a default
-    SessionState for an unknown id, so the worst case for a session that is
-    somehow still live after the TTL is that its deny counters reset.
+    A DISABLED session is never pruned, however old its file is. Its state is
+    a standing decision by the operator (`aegis off`) or by the deny-storm
+    auto-pause, not a cache entry -- and because __main__ returns early for a
+    disabled session without re-saving, its mtime stops advancing the moment
+    it is disabled, so it looks stale almost immediately. Deleting it would
+    silently resurrect the session as enabled, which is the wrong failure
+    direction and the exact opposite of what the operator asked for.
+
+    For an enabled session the worst case is harmless: an unknown id loads as
+    a fresh SessionState, so its deny counters reset.
     """
-    if ttl_days <= 0 or not STATE_DIR.exists():
+    if not isinstance(ttl_days, int) or isinstance(ttl_days, bool) or ttl_days <= 0:
+        return 0
+    if not STATE_DIR.exists():
         return 0
     cutoff = time.time() - ttl_days * 86400
     removed = 0
     for p in STATE_DIR.glob("*.json"):
         try:
-            if p.stat().st_mtime < cutoff:
-                p.unlink()
-                removed += 1
+            if p.stat().st_mtime >= cutoff:
+                continue
+            if not load(p.stem).enabled:
+                continue  # standing operator decision, not a cache entry
+            # Re-check immediately before unlinking: a concurrent `aegis off`
+            # may have replaced the file since the stat above.
+            if p.stat().st_mtime >= cutoff:
+                continue
+            p.unlink()
+            removed += 1
         except OSError:
             continue
     return removed

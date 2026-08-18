@@ -2,6 +2,67 @@
 
 ## Unreleased
 
+### Security
+
+Found by an adversarial review of the `defer_scope` work. All six were
+reproduced before being fixed and are pinned by tests.
+
+- **The project config layer is now untrusted.** `<cwd>/.aegis/aegis.toml`
+  used to merge with the same authority as the operator's own global config,
+  but it is a file inside whatever repository the agent has open. A
+  checked-in project config was a complete bypass: `on_exhaustion = "allow"`
+  with a bogus provider chain auto-approved everything, `defer_scope = "all"`
+  dropped every deterministic tripwire, and `[environment] trusted_domains`
+  widened the exfiltration boundary. A project may now only *ratchet* a
+  setting toward its stricter value (`ask_mode = "prompt"`,
+  `defer_scope = "classifier"`, `hard_deny_action = "block"`) plus set
+  `[context]` and `snapshot_ttl_days`; every other table is global-only. See
+  `PROJECT_KEYS` / `PROJECT_RATCHETS` in `classifier/rules.py`, mirrored in
+  `lib/ask-mode.sh` because the two resolvers must agree.
+- **`[logging] diag_path` was an arbitrary-file rename-and-overwrite
+  primitive.** A project pointing it at any user-writable file, with
+  `max_bytes = 1`, made the next tool call rename that file to `<name>.1`
+  and replace it with a JSON log row -- silently stripping a global
+  `hard_deny_action = "block"` policy, among other things. Rotation is what
+  turned the previous append-only behavior destructive. `[logging]` is now
+  global-only.
+- **A malformed config value failed a hard block open.** `max_bytes = "x"`
+  raised inside `diag.emit`, which runs *before* `decision.surface()`, so a
+  classifier DENY configured to block exited 1 with empty stdout -- an
+  ignored hook error -- instead of 2. Every config value is now type-checked,
+  `on_exhaustion` is validated against `allow|deny|ask`, and both the diag
+  and prune calls are wrapped so diagnostics can never change a decision.
+- **Writes to Aegis's own config and install tree now ask.**
+  `lib/bash-gatekeeper.sh` matches on the executable name and never inspects
+  redirections, so it handed an unconditional ALLOW to
+  `printf ... > .aegis/aegis.toml`, letting an agent switch off the very
+  tripwires the `defer_scope = "classifier"` default preserves. Covered for
+  Bash in `lib/bash-hard-ask.sh` (redirects in every operator form, including
+  `>|` and fd-prefixed, plus tee/sed -i/cp/mv/rm/dd/chmod/truncate) and for
+  Edit/Write in `lib/protected-paths.sh`. Reads are untouched. It matches on
+  command text, so a command that merely mentions those paths also asks,
+  which is why it asks rather than denies.
+- **The bash config reader no longer reads configuration out of string
+  content.** `lib/ask-mode.sh` matched `defer_scope = "all"` inside a
+  multi-line TOML string, so the shell layers and Python's `tomllib`
+  disagreed about what was gated: `aegis status` reported deterministic asks
+  still prompting while the orchestrator silently dropped them. Multi-line
+  basic and literal strings are now tracked and skipped, and both keys are
+  read in one pass instead of two.
+- **Pruning no longer resurrects a disabled session.** The classifier returns
+  early for a disabled session without re-saving, so its mtime stops
+  advancing the moment it is disabled and it looks stale almost immediately.
+  Pruning it reloaded the session as `enabled=True`, undoing `aegis off` and
+  the deny-storm auto-pause. Disabled sessions are now never pruned, and the
+  unlink re-checks mtime to narrow the race with a concurrent write.
+- Rotation takes an `O_EXCL` lock (with a stale-lock escape), so two hooks
+  that both observe a full log cannot both rename it and destroy the
+  retained generation. A newly created log is mode 0600; rows quote pending
+  command text and classifier reasons.
+- Test suites unset the provider API keys. Stubbing `HOME` does not on its
+  own keep a run offline, because the SDK reads `GEMINI_API_KEY` from the
+  environment -- the previous comment claiming otherwise was wrong.
+
 ### Behavior
 
 - **`[behavior] defer_scope`** decides which asks go silent under
@@ -83,6 +144,15 @@
   permission config hardening, and plugin hook behavior.
 - Added Python tests for `defer_scope` resolution, log rotation, and session
   pruning, plus a `defer_scope` matrix in `tests/bash/ask-mode-cases.sh`.
+- Added `tests/python/test_project_trust.py` (24 cases) pinning the untrusted
+  project layer, the behavior ratchet, and config type validation, including
+  end-to-end runs of the two reproductions that mattered: the global-config
+  overwrite, and the hard block that exited 1.
+- Added `tests/bash/self-modification-cases.sh` and its corpus, covering the
+  Bash and Edit/Write paths into Aegis's config and install tree.
+- `tests/bash/ask-mode-cases.sh` moves its loosening fixtures from project
+  configs to stubbed global configs (they are global-only now) and gains four
+  cases asserting the project ratchet in both directions.
 
 ## 1.1.0 -- 2026-05-20
 

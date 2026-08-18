@@ -5,15 +5,23 @@
 # These cases assert Aegis's DEFAULT behavior (ask_mode = "prompt"), so the
 # run must not inherit the developer's own settings: an operator config with
 # [behavior] ask_mode = "defer" turns every expected ask into a silent
-# fall-through. HOME is stubbed and every AEGIS_* override is cleared below.
-# Stubbing HOME also keeps the one live-classifier case off the network,
-# since provider credentials live under the real HOME.
+# fall-through.
+#
+# Cleared below: HOME (stubbed), the AEGIS_* behavior overrides, and the
+# provider API keys. The keys matter -- stubbing HOME alone does NOT take the
+# one live-classifier case off the network, because the SDK reads
+# GEMINI_API_KEY straight from the environment.
+#
+# AEGIS_TEST_MOCK_DECISION is deliberately NOT cleared: running this suite
+# under it is a documented mode (see README) that exercises the dispatch
+# without a model.
 
 set -u
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ORCH="$DIR/../../orchestrator.sh"
 
 unset AEGIS_ASK_MODE AEGIS_DEFER_SCOPE AEGIS_HARD_DENY_ACTION
+unset GEMINI_API_KEY GOOGLE_API_KEY GOOGLE_GENAI_API_KEY ANTHROPIC_API_KEY
 STUB_HOME=$(mktemp -d)
 export HOME="$STUB_HOME"
 trap 'rm -rf "$STUB_HOME"' EXIT

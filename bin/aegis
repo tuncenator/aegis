@@ -68,6 +68,12 @@ def cmd_status(args: argparse.Namespace) -> int:
             print("  (deterministic hard-asks defer too)")
     print(f"  hard_deny_action: {cfg.hard_deny_action}")
     print(f"  on_exhaustion: {cfg.on_exhaustion}")
+    # A project config is untrusted: it can only ratchet toward stricter
+    # values. Worth naming so a setting that "isn't taking effect" is
+    # explicable rather than mysterious.
+    proj = Path(os.getcwd()) / ".aegis" / "aegis.toml"
+    if proj.exists():
+        print(f"  project config: {proj} (untrusted, may only tighten)")
 
     print("Rules")
     age = rl.snapshot_age_days()

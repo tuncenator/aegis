@@ -140,3 +140,60 @@ def test_prune_if_due_runs_again_once_the_interval_lapses(tmp_state_dir):
 def test_prune_survives_a_missing_state_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(state, "STATE_DIR", tmp_path / "gone")
     assert state.prune(ttl_days=1) == 0
+
+
+def test_prune_never_deletes_a_disabled_session(tmp_state_dir):
+    """A disabled session's file is a standing decision, not a cache entry.
+
+    __main__ returns early for a disabled session WITHOUT re-saving, so its
+    mtime stops advancing the moment it is disabled and it looks stale almost
+    immediately. Pruning it silently resurrected the session as enabled --
+    the exact opposite of what `aegis off` was asked to do.
+    """
+    off = state.SessionState(session_id="turned-off", enabled=False, paused_reason="manual")
+    state.save(off)
+    paused = state.SessionState(session_id="auto-paused", enabled=False,
+                                paused_reason="consecutive_deny_limit")
+    state.save(paused)
+    live = state.SessionState(session_id="still-on", enabled=True)
+    state.save(live)
+
+    stale = time.time() - 999 * 86400
+    for name in ("turned-off", "auto-paused", "still-on"):
+        p = tmp_state_dir / f"{name}.json"
+        os.utime(p, (stale, stale))
+
+    assert state.prune(ttl_days=1) == 1  # only the enabled one
+    assert state.load("turned-off").enabled is False
+    assert state.load("auto-paused").enabled is False
+    assert state.load("auto-paused").paused_reason == "consecutive_deny_limit"
+    assert not (tmp_state_dir / "still-on.json").exists()
+
+
+def test_prune_rejects_a_non_integer_ttl(tmp_state_dir):
+    p = tmp_state_dir / "s.json"
+    p.write_text("{}")
+    stale = time.time() - 999 * 86400
+    os.utime(p, (stale, stale))
+    assert state.prune(ttl_days="x") == 0
+    assert state.prune(ttl_days=True) == 0
+    assert p.exists()
+
+
+def test_prune_skips_a_file_refreshed_after_the_stat(tmp_state_dir, monkeypatch):
+    """Narrows the unlink race: re-stat immediately before removing."""
+    p = tmp_state_dir / "racy.json"
+    state.save(state.SessionState(session_id="racy", enabled=True))
+    stale = time.time() - 999 * 86400
+    os.utime(p, (stale, stale))
+
+    real_load = state.load
+
+    def touch_then_load(session_id):
+        result = real_load(session_id)
+        os.utime(p, None)  # concurrent writer refreshes the file
+        return result
+
+    monkeypatch.setattr(state, "load", touch_then_load)
+    assert state.prune(ttl_days=1) == 0
+    assert p.exists()

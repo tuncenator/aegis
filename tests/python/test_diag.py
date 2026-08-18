@@ -90,3 +90,53 @@ def test_max_bytes_zero_disables_rotation(tmp_log):
         _row(tmp_log, max_bytes=0)
     assert len(tmp_log.read_text().splitlines()) == 5
     assert not Path(str(tmp_log) + ".1").exists()
+
+
+def test_new_log_is_created_private(tmp_log):
+    """Rows quote pending command text and classifier reason strings, which
+    can repeat secret-bearing fragments."""
+    import stat
+    _row(tmp_log)
+    assert stat.S_IMODE(tmp_log.stat().st_mode) == 0o600
+
+
+def test_rotation_leaves_no_lock_behind(tmp_log):
+    _row(tmp_log)
+    _row(tmp_log, max_bytes=1)
+    assert not Path(str(tmp_log) + ".rotating").exists()
+
+
+def test_a_held_lock_defers_rotation_instead_of_racing(tmp_log):
+    """Two hooks that both see a full log must not both rotate: the second
+    rename would replace the first's retained generation with a one-row file."""
+    import os
+    _row(tmp_log, reason="original")
+    lock = Path(str(tmp_log) + ".rotating")
+    fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        _row(tmp_log, max_bytes=1, reason="appended")
+        assert not Path(str(tmp_log) + ".1").exists()
+        assert "original" in tmp_log.read_text()
+        assert "appended" in tmp_log.read_text()
+    finally:
+        os.close(fd)
+        lock.unlink()
+
+
+def test_stale_lock_does_not_block_rotation_forever(tmp_log):
+    import os, time as _t
+    _row(tmp_log)
+    lock = Path(str(tmp_log) + ".rotating")
+    lock.write_text("")
+    old = _t.time() - 10 * diag._LOCK_STALE_S
+    os.utime(lock, (old, old))
+    _row(tmp_log, max_bytes=1)
+    assert Path(str(tmp_log) + ".1").exists()
+
+
+def test_non_integer_max_bytes_never_raises(tmp_log):
+    """diag.emit runs before the verdict is surfaced; raising here turned a
+    configured hard block into an ignored hook error."""
+    for bad in ("x", None, True, 1.5):
+        _row(tmp_log, max_bytes=bad)
+    assert len(tmp_log.read_text().splitlines()) == 4

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -25,21 +26,55 @@ from pathlib import Path
 # 115k decisions per generation.
 DEFAULT_MAX_BYTES = 32 * 1024 * 1024
 
+# A rotation lock older than this was orphaned by a killed process.
+_LOCK_STALE_S = 30
+
 
 def _rotate_if_needed(target: Path, max_bytes: int) -> None:
-    if max_bytes <= 0:
+    """Rename target to <name>.1 once it crosses max_bytes.
+
+    Guarded by an O_EXCL lock file so two hooks that both observe a full log
+    cannot both rotate: without it, the second rename replaces the first's
+    freshly-retained generation with a one-row file, destroying the history
+    the rotation existed to keep. Losing the lock race simply means skipping
+    rotation this once; the next call rotates.
+    """
+    if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes <= 0:
         return
     try:
         if target.stat().st_size < max_bytes:
             return
     except OSError:
         return
+
+    lock = target.parent / (target.name + ".rotating")
     try:
-        os.replace(target, target.parent / (target.name + ".1"))
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        # Another process is rotating, unless its lock was orphaned by a kill.
+        try:
+            if time.time() - lock.stat().st_mtime < _LOCK_STALE_S:
+                return
+            os.unlink(lock)
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except OSError:
+            return
     except OSError:
-        # A concurrent hook already rotated it, or the directory is not
-        # writable. Either way, logging must never break a tool call.
+        return
+
+    try:
+        # Re-check under the lock: the winner may already have rotated.
+        if target.stat().st_size >= max_bytes:
+            os.replace(target, target.parent / (target.name + ".1"))
+    except OSError:
+        # Logging must never break a tool call.
         pass
+    finally:
+        os.close(fd)
+        try:
+            os.unlink(lock)
+        except OSError:
+            pass
 
 
 def emit(
@@ -69,5 +104,9 @@ def emit(
         "latency_ms": latency_ms,
         "tokens": tokens,
     }
-    with target.open("a") as f:
+    # 0600 on creation: rows quote pending command text and classifier reason
+    # strings, which can repeat secret-bearing fragments. An existing file
+    # keeps whatever mode the operator gave it -- os.open does not chmod.
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(fd, "a") as f:
         f.write(json.dumps(row) + "\n")

@@ -59,6 +59,19 @@ case "$PATH_EXPANDED" in
   /var/log/*)                   ask "writes inside /var/log" ;;
 esac
 
+# Aegis's own configuration and install tree -- self-modification of the
+# guard. The Bash side of this is covered by lib/bash-hard-ask.sh; this is
+# the Edit/Write/NotebookEdit side. A project .aegis/aegis.toml can only
+# ratchet toward stricter settings (classifier/rules.py PROJECT_RATCHETS),
+# but the global config and the install tree have no such limit, and an
+# unreviewed edit to either switches Aegis off wholesale.
+AEGIS_ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
+case "$PATH_EXPANDED" in
+  */.aegis/*|*/.aegis)                    ask "writes to project Aegis config" ;;
+  "$HOME/.config/aegis"/*)                ask "writes to global Aegis config" ;;
+  "$AEGIS_ROOT"/*)                        ask "writes into the Aegis install tree" ;;
+esac
+
 # SSH directory
 case "$PATH_EXPANDED" in
   "$HOME/.ssh"/*|/root/.ssh/*) ask "writes inside SSH directory" ;;

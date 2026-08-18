@@ -144,6 +144,11 @@ max_bytes = 33554432
 session_ttl_days = 14
 
 [behavior]
+# NOTE ON LAYERING: a per-project <repo>/.aegis/aegis.toml may only ratchet
+# these toward the stricter value ("prompt", "classifier", "block"). It lives
+# inside whatever repository the agent has open, so it is untrusted; every
+# other table below is global-only. See the README's Trust model section.
+#
 # What happens on an ASK verdict.
 #   "prompt" -- surface it, Claude Code prompts you.
 #   "defer"  -- emit nothing, so Claude Code's own auto-mode classifier

@@ -18,13 +18,21 @@
 #
 # Hard denies (exit 2) and allows must be identical in every combination.
 #
-# Hermetic on two axes:
+# LAYERS. The loosening settings live in a stubbed GLOBAL config (one HOME per
+# combination) because they are global-only: <cwd>/.aegis/aegis.toml is a file
+# inside whatever repository the agent has open, so it may only ratchet toward
+# the stricter value. The ratchet is asserted below; without it any repo could
+# check in defer_scope = "all" and silence every tripwire.
+#
+# Hermetic on three axes:
 #   - No live model call. The classifier layer is exercised through
-#     AEGIS_TEST_MOCK_DECISION, which orchestrator.sh honours in place of
-#     the Python classifier.
-#   - No developer state. HOME is stubbed and every AEGIS_* override is
-#     cleared, so the operator's own ~/.config/aegis/aegis.toml (which may
-#     well set ask_mode = "defer") cannot steer the assertions.
+#     AEGIS_TEST_MOCK_DECISION, which orchestrator.sh honours in place of the
+#     Python classifier; the deny cases drive the real classifier with a chain
+#     of one unknown provider, so it exhausts without touching the network.
+#   - No developer config. HOME is stubbed per case and the AEGIS_* behavior
+#     overrides are cleared, so the operator's own aegis.toml cannot steer it.
+#   - No credentials. The provider API keys are unset. Stubbing HOME is not
+#     enough on its own: the SDK reads GEMINI_API_KEY from the environment.
 
 set -u
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,17 +40,23 @@ ORCH="$DIR/../../orchestrator.sh"
 
 # --- isolation --------------------------------------------------------------
 unset AEGIS_ASK_MODE AEGIS_DEFER_SCOPE AEGIS_HARD_DENY_ACTION AEGIS_TEST_MOCK_DECISION
-REAL_HOME="$HOME"
-STUB_HOME=$(mktemp -d)
-export HOME="$STUB_HOME"
+unset GEMINI_API_KEY GOOGLE_API_KEY GOOGLE_GENAI_API_KEY ANTHROPIC_API_KEY
 
 PASS=0; FAIL=0
 FAILS=()
+TMPDIRS=()
 
-# One cwd per config combination, so the TOML path is exercised and not just
-# the env vars. An absent [behavior] table means the built-in defaults.
-mkcwd() {  # $1 = toml body ("" for none)
-  local dir; dir=$(mktemp -d)
+# A stubbed HOME carrying one global config. $1 = toml body ("" for none).
+mkhome() {
+  local dir; dir=$(mktemp -d); TMPDIRS+=("$dir")
+  mkdir -p "$dir/.config/aegis"
+  [ -n "$1" ] && printf '%s\n' "$1" > "$dir/.config/aegis/aegis.toml"
+  echo "$dir"
+}
+
+# A project directory, optionally carrying an (untrusted) project config.
+mkcwd() {
+  local dir; dir=$(mktemp -d); TMPDIRS+=("$dir")
   if [ -n "$1" ]; then
     mkdir -p "$dir/.aegis"
     printf '%s\n' "$1" > "$dir/.aegis/aegis.toml"
@@ -50,20 +64,19 @@ mkcwd() {  # $1 = toml body ("" for none)
   echo "$dir"
 }
 
-PROMPT_CWD=$(mkcwd "")
-DEFER_CWD=$(mkcwd '[behavior]
+H_PROMPT=$(mkhome "")
+H_DEFER=$(mkhome '[behavior]
 ask_mode = "defer"')
-DEFER_ALL_CWD=$(mkcwd '[behavior]
+H_DEFER_ALL=$(mkhome '[behavior]
 ask_mode = "defer"
 defer_scope = "all"')
-DEFER_CLS_CWD=$(mkcwd '[behavior]
+H_DEFER_CLS=$(mkhome '[behavior]
 ask_mode = "defer"
 defer_scope = "classifier"')
 
-cleanup() {
-  export HOME="$REAL_HOME"
-  rm -rf "$STUB_HOME" "$PROMPT_CWD" "$DEFER_CWD" "$DEFER_ALL_CWD" "$DEFER_CLS_CWD"
-}
+PLAIN_CWD=$(mkcwd "")
+
+cleanup() { rm -rf "${TMPDIRS[@]}"; }
 trap cleanup EXIT
 
 payload() {
@@ -74,10 +87,10 @@ payload() {
       tool_input:{($k):$v}}'
 }
 
-# $1 name, $2 payload, $3 expected stdout shape (ask|allow|deny|empty), $4 expected exit
+# $1 name, $2 payload, $3 expected stdout (ask|allow|deny|empty), $4 exit, $5 HOME
 assert() {
-  local name="$1" input="$2" want_out="$3" want_rc="$4" out rc got
-  out=$(echo "$input" | "$ORCH" 2>/dev/null)
+  local name="$1" input="$2" want_out="$3" want_rc="$4" home="$5" out rc got
+  out=$(echo "$input" | HOME="$home" "$ORCH" 2>/dev/null)
   rc=$?
   # The shell layers emit compact JSON, the Python classifier emits
   # json.dumps spacing, so match both.
@@ -97,61 +110,85 @@ assert() {
   fi
 }
 
-force_push() { payload Bash command 'git push --force origin feature-x' "$1"; }
-etc_write()  { payload Edit file_path /etc/passwd "$1"; }
-novel()      { payload Bash command 'frobnicate --quux' "$1"; }
+force_push() { payload Bash command 'git push --force origin feature-x' "${1:-$PLAIN_CWD}"; }
+etc_write()  { payload Edit file_path /etc/passwd "${1:-$PLAIN_CWD}"; }
+novel()      { payload Bash command 'frobnicate --quux' "${1:-$PLAIN_CWD}"; }
+rm_root()    { payload Bash command 'rm -rf /' "${1:-$PLAIN_CWD}"; }
+ls_la()      { payload Bash command 'ls -la' "${1:-$PLAIN_CWD}"; }
 
 echo "--- ask_mode = prompt (default): everything asks ---"
-assert "hard-ask: git push --force"          "$(force_push "$PROMPT_CWD")" ask 0
-assert "protected path: Edit /etc/passwd"    "$(etc_write  "$PROMPT_CWD")" ask 0
+assert "hard-ask: git push --force"       "$(force_push)" ask 0 "$H_PROMPT"
+assert "protected path: Edit /etc/passwd" "$(etc_write)"  ask 0 "$H_PROMPT"
 
 echo "--- ask_mode = defer, defer_scope default: deterministic asks survive ---"
-assert "hard-ask still prompts"              "$(force_push "$DEFER_CWD")" ask 0
-assert "protected path still prompts"        "$(etc_write  "$DEFER_CWD")" ask 0
-assert "explicit defer_scope=classifier"     "$(force_push "$DEFER_CLS_CWD")" ask 0
+assert "hard-ask still prompts"           "$(force_push)" ask 0 "$H_DEFER"
+assert "protected path still prompts"     "$(etc_write)"  ask 0 "$H_DEFER"
+assert "explicit defer_scope=classifier"  "$(force_push)" ask 0 "$H_DEFER_CLS"
 
 echo "--- ask_mode = defer, defer_scope = all: deterministic asks go silent ---"
-assert "hard-ask defers"                     "$(force_push "$DEFER_ALL_CWD")" empty 0
-assert "protected path defers"               "$(etc_write  "$DEFER_ALL_CWD")" empty 0
+assert "hard-ask defers"                  "$(force_push)" empty 0 "$H_DEFER_ALL"
+assert "protected path defers"            "$(etc_write)"  empty 0 "$H_DEFER_ALL"
 
 echo "--- deny and allow are unaffected by either setting ---"
-assert "hard-deny: rm -rf / (defer)"         "$(payload Bash command 'rm -rf /' "$DEFER_CWD")"     empty 2
-assert "hard-deny: rm -rf / (defer all)"     "$(payload Bash command 'rm -rf /' "$DEFER_ALL_CWD")" empty 2
-assert "allow: ls -la (defer)"               "$(payload Bash command 'ls -la' "$DEFER_CWD")"       allow 0
-assert "allow: ls -la (defer all)"           "$(payload Bash command 'ls -la' "$DEFER_ALL_CWD")"   allow 0
-assert "allow: ls -la (prompt)"              "$(payload Bash command 'ls -la' "$PROMPT_CWD")"      allow 0
+assert "hard-deny: rm -rf / (defer)"      "$(rm_root)" empty 2 "$H_DEFER"
+assert "hard-deny: rm -rf / (defer all)"  "$(rm_root)" empty 2 "$H_DEFER_ALL"
+assert "allow: ls -la (defer)"            "$(ls_la)"   allow 0 "$H_DEFER"
+assert "allow: ls -la (defer all)"        "$(ls_la)"   allow 0 "$H_DEFER_ALL"
+assert "allow: ls -la (prompt)"           "$(ls_la)"   allow 0 "$H_PROMPT"
 
 echo "--- classifier layer (mocked verdict, no live model) ---"
 # The classifier's own ASK defers under ask_mode=defer in BOTH scopes:
 # defer_scope only governs the deterministic layers.
 AEGIS_TEST_MOCK_DECISION=ask assert "classifier ask, prompt mode" \
-  "$(novel "$PROMPT_CWD")" ask 0
+  "$(novel)" ask 0 "$H_PROMPT"
 AEGIS_TEST_MOCK_DECISION=ask assert "classifier ask, defer + scope=classifier" \
-  "$(novel "$DEFER_CWD")" empty 0
+  "$(novel)" empty 0 "$H_DEFER"
 AEGIS_TEST_MOCK_DECISION=ask assert "classifier ask, defer + scope=all" \
-  "$(novel "$DEFER_ALL_CWD")" empty 0
+  "$(novel)" empty 0 "$H_DEFER_ALL"
 AEGIS_TEST_MOCK_DECISION=allow assert "classifier allow, defer mode" \
-  "$(novel "$DEFER_CWD")" allow 0
+  "$(novel)" allow 0 "$H_DEFER"
 
 echo "--- env vars override config ---"
-AEGIS_ASK_MODE=defer AEGIS_DEFER_SCOPE=all assert "env defer+all beats prompt-mode cwd" \
-  "$(force_push "$PROMPT_CWD")" empty 0
-AEGIS_ASK_MODE=prompt assert "env prompt beats defer-mode cwd" \
-  "$(force_push "$DEFER_ALL_CWD")" ask 0
-AEGIS_DEFER_SCOPE=classifier assert "env scope=classifier beats cwd scope=all" \
-  "$(force_push "$DEFER_ALL_CWD")" ask 0
+AEGIS_ASK_MODE=defer AEGIS_DEFER_SCOPE=all assert "env defer+all beats prompt config" \
+  "$(force_push)" empty 0 "$H_PROMPT"
+AEGIS_ASK_MODE=prompt assert "env prompt beats defer config" \
+  "$(force_push)" ask 0 "$H_DEFER_ALL"
+AEGIS_DEFER_SCOPE=classifier assert "env scope=classifier beats config scope=all" \
+  "$(force_push)" ask 0 "$H_DEFER_ALL"
+
+# The project layer is untrusted: <cwd>/.aegis/aegis.toml lives inside the
+# repository the agent has open. It may tighten, never loosen. Without this,
+# any repo could check in defer_scope = "all" and silence every tripwire the
+# "classifier" default exists to preserve.
+echo "--- project config may ratchet, never loosen ---"
+CWD_WANTS_ALL=$(mkcwd '[behavior]
+ask_mode = "defer"
+defer_scope = "all"')
+CWD_WANTS_STRICT=$(mkcwd '[behavior]
+ask_mode = "prompt"
+defer_scope = "classifier"')
+
+assert "project defer_scope=all is ignored" \
+  "$(force_push "$CWD_WANTS_ALL")" ask 0 "$H_DEFER_CLS"
+assert "project ask_mode=defer is ignored" \
+  "$(force_push "$CWD_WANTS_ALL")" ask 0 "$H_PROMPT"
+assert "project may tighten scope to classifier" \
+  "$(force_push "$CWD_WANTS_STRICT")" ask 0 "$H_DEFER_ALL"
+AEGIS_TEST_MOCK_DECISION=ask assert "project may tighten ask_mode to prompt" \
+  "$(novel "$CWD_WANTS_STRICT")" ask 0 "$H_DEFER"
 
 # A classifier DENY is never deferred: the snapshot's hard_deny section
 # (Data Exfiltration) arrives as a deny, and deferring it would hand the call
 # to the native classifier instead of to the operator.
 #
-# These two run the REAL Python classifier end to end, still without a model
-# call: the provider chain is a single unknown provider, which _call_provider
-# returns None for immediately, so the chain exhausts and on_exhaustion
-# synthesizes the deny verdict.
+# These run the REAL Python classifier end to end, still without a model call:
+# the provider chain is a single unknown provider, which _call_provider returns
+# None for immediately, so the chain exhausts and on_exhaustion synthesizes the
+# deny verdict. chain and on_exhaustion are global-only, so they live in the
+# stubbed HOME rather than in a project config.
 echo "--- classifier DENY under ask_mode=defer (real classifier, no model) ---"
-deny_cwd() {
-  mkcwd "[classifier]
+deny_home() {
+  mkhome "[classifier]
 chain = [ { provider = \"none\", model = \"unused\", retries = 1, timeout_s = 1 } ]
 on_exhaustion = \"deny\"
 
@@ -160,11 +197,11 @@ ask_mode = \"defer\"
 defer_scope = \"all\"
 hard_deny_action = \"$1\""
 }
-DENY_PROMPT_CWD=$(deny_cwd prompt)
-DENY_BLOCK_CWD=$(deny_cwd block)
+H_DENY_PROMPT=$(deny_home prompt)
+H_DENY_BLOCK=$(deny_home block)
 
 deny_payload() {
-  jq -nc --arg c "$1" --arg s "ask-mode-deny-$2-$$-$RANDOM" \
+  jq -nc --arg c "$PLAIN_CWD" --arg s "ask-mode-deny-$1-$$-$RANDOM" \
     '{session_id:$s,transcript_path:"/nonexistent.jsonl",cwd:$c,
       hook_event_name:"PreToolUse",tool_name:"Bash",
       tool_input:{command:"frobnicate --quux"}}'
@@ -172,10 +209,8 @@ deny_payload() {
 
 # defer_scope = "all" is deliberate here: even the most permissive deferral
 # setting must not swallow a deny.
-assert "deny surfaces as ask, not silence" "$(deny_payload "$DENY_PROMPT_CWD" a)" ask   0
-assert "deny hard-blocks with action=block" "$(deny_payload "$DENY_BLOCK_CWD" b)" empty 2
-
-rm -rf "$DENY_PROMPT_CWD" "$DENY_BLOCK_CWD"
+assert "deny surfaces as ask, not silence"  "$(deny_payload a)" ask   0 "$H_DENY_PROMPT"
+assert "deny hard-blocks with action=block" "$(deny_payload b)" empty 2 "$H_DENY_BLOCK"
 
 echo "----"
 echo "PASS=$PASS FAIL=$FAIL"

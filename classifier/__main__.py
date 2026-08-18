@@ -105,19 +105,31 @@ def main() -> int:
     state.save(sess)
     # Housekeeping, at most once a day and never fatal: one state file is
     # written per session and nothing else removes them.
-    state.prune_if_due(cfg.session_ttl_days)
+    try:
+        state.prune_if_due(cfg.session_ttl_days)
+    except Exception:
+        pass
 
-    diag.emit(
-        cfg.diag_path,
-        session_id=session_id,
-        tool=payload.get("tool_name", "?"),
-        layer="classifier",
-        decision=d.decision,
-        reason=d.reason,
-        model=used_model,
-        latency_ms=int((time.time() - t0) * 1000),
-        max_bytes=cfg.diag_max_bytes,
-    )
+    # Diagnostics must never change a decision. This call runs BEFORE the
+    # verdict is surfaced, so an exception here (a bad diag_path, a full
+    # disk, a malformed max_bytes) would exit non-zero with empty stdout --
+    # which Claude Code reads as an ignored hook error, turning a configured
+    # hard block into a silent pass. Config values are type-checked in
+    # rules.py; this is the backstop for everything else.
+    try:
+        diag.emit(
+            cfg.diag_path,
+            session_id=session_id,
+            tool=payload.get("tool_name", "?"),
+            layer="classifier",
+            decision=d.decision,
+            reason=d.reason,
+            model=used_model,
+            latency_ms=int((time.time() - t0) * 1000),
+            max_bytes=cfg.diag_max_bytes,
+        )
+    except Exception:
+        pass
 
     # In ask_mode="defer" an ASK surfaces as the empty string, so nothing
     # is written and Claude Code's own permission pipeline decides. A DENY

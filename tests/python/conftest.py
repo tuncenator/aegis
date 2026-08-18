@@ -26,6 +26,15 @@ AEGIS_ENV_VARS = (
     "AEGIS_TEST_MOCK_DECISION",
 )
 
+# Provider credentials. The SDKs read these from the environment, so stubbing
+# HOME does not on its own keep a test off the network.
+PROVIDER_ENV_VARS = (
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_GENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+)
+
 
 @pytest.fixture(autouse=True)
 def _isolate_environment(tmp_path, monkeypatch):
@@ -42,7 +51,7 @@ def _isolate_environment(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
-    for var in AEGIS_ENV_VARS:
+    for var in AEGIS_ENV_VARS + PROVIDER_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
 
     monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", home / ".config" / "aegis" / "aegis.toml")

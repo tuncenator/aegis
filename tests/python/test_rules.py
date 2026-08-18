@@ -83,18 +83,25 @@ trusted_domains = ["example.com"]
     assert cfg.trusted_orgs == ["MYORG"]
 
 
-def test_load_config_project_overrides_global(tmp_path, monkeypatch):
+def test_project_layer_overrides_only_what_it_is_allowed_to(tmp_path, monkeypatch):
+    """The project layer used to override global wholesale. It no longer can:
+    it is a file inside the repo the agent has open, so it may only ratchet
+    toward stricter values and set context knobs. See test_project_trust.py
+    for the full contract; this pins the layering shape."""
     g = tmp_path / "global.toml"
-    g.write_text('[counters]\nconsecutive_deny_limit = 5\ntotal_deny_limit = 50\n')
+    g.write_text('[counters]\nconsecutive_deny_limit = 5\ntotal_deny_limit = 50\n\n'
+                 '[context]\nlast_user_messages = 20\n')
     monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", g)
     proj = tmp_path / "proj"
     (proj / ".aegis").mkdir(parents=True)
     (proj / ".aegis" / "aegis.toml").write_text(
-        '[counters]\nconsecutive_deny_limit = 10\n'
+        '[counters]\nconsecutive_deny_limit = 10\n\n'
+        '[context]\nlast_user_messages = 3\n'
     )
     cfg = rules.load_config(project_dir=str(proj))
-    assert cfg.consecutive_deny_limit == 10  # project override
-    assert cfg.total_deny_limit == 50  # inherited from global
+    assert cfg.consecutive_deny_limit == 5   # counters are global-only
+    assert cfg.total_deny_limit == 50        # inherited from global
+    assert cfg.last_user_messages == 3       # context is project-settable
 
 
 def test_ask_mode_defaults_to_prompt(tmp_path, monkeypatch):
