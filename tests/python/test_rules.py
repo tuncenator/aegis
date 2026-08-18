@@ -160,3 +160,59 @@ def test_hard_deny_action_invalid_value_ignored(tmp_path, monkeypatch):
     g.write_text('[behavior]\nhard_deny_action = "nuke"\n')
     monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", g)
     assert rules.load_config(project_dir=None).hard_deny_action == "prompt"
+
+
+def test_defer_scope_defaults_to_classifier(tmp_path, monkeypatch):
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", tmp_path / "missing.toml")
+    assert rules.load_config(project_dir=None).defer_scope == "classifier"
+
+
+def test_defer_scope_from_config(tmp_path, monkeypatch):
+    cfgfile = tmp_path / "aegis.toml"
+    cfgfile.write_text('[behavior]\nask_mode = "defer"\ndefer_scope = "all"\n')
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", cfgfile)
+    cfg = rules.load_config(project_dir=None)
+    assert cfg.ask_mode == "defer"
+    assert cfg.defer_scope == "all"
+
+
+def test_defer_scope_invalid_value_falls_back_to_default(tmp_path, monkeypatch):
+    cfgfile = tmp_path / "aegis.toml"
+    cfgfile.write_text('[behavior]\ndefer_scope = "sometimes"\n')
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", cfgfile)
+    assert rules.load_config(project_dir=None).defer_scope == "classifier"
+
+
+def test_defer_scope_env_overrides_config(tmp_path, monkeypatch):
+    cfgfile = tmp_path / "aegis.toml"
+    cfgfile.write_text('[behavior]\ndefer_scope = "all"\n')
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", cfgfile)
+    monkeypatch.setenv("AEGIS_DEFER_SCOPE", "classifier")
+    assert rules.load_config(project_dir=None).defer_scope == "classifier"
+
+
+def test_project_config_overrides_global_defer_scope(tmp_path, monkeypatch):
+    glob = tmp_path / "global.toml"
+    glob.write_text('[behavior]\ndefer_scope = "all"\n')
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", glob)
+    proj = tmp_path / "proj"
+    (proj / ".aegis").mkdir(parents=True)
+    (proj / ".aegis" / "aegis.toml").write_text('[behavior]\ndefer_scope = "classifier"\n')
+    assert rules.load_config(str(proj)).defer_scope == "classifier"
+
+
+def test_log_and_state_housekeeping_defaults(tmp_path, monkeypatch):
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", tmp_path / "missing.toml")
+    cfg = rules.load_config(project_dir=None)
+    assert cfg.diag_max_bytes == 32 * 1024 * 1024
+    assert cfg.session_ttl_days == 14
+
+
+def test_log_and_state_housekeeping_from_config(tmp_path, monkeypatch):
+    cfgfile = tmp_path / "aegis.toml"
+    cfgfile.write_text(
+        '[logging]\nmax_bytes = 4096\n\n[state]\nsession_ttl_days = 3\n')
+    monkeypatch.setattr(rules, "GLOBAL_CONFIG_PATH", cfgfile)
+    cfg = rules.load_config(project_dir=None)
+    assert cfg.diag_max_bytes == 4096
+    assert cfg.session_ttl_days == 3

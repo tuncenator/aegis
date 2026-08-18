@@ -27,6 +27,13 @@
 # would continue to the NEXT Aegis layer, so a deferred hard-ask could end
 # up allowed by the gatekeeper or the LLM classifier instead of handed to
 # Claude Code's native auto-mode classifier.
+#
+# Under ask_mode=defer, defer_scope decides WHICH asks go silent:
+#   classifier (default) -- only the LLM classifier's verdicts defer. The
+#     deterministic layers above still prompt, because the auto-mode rule
+#     snapshot has no rules for the ground they cover (/etc, /usr/bin,
+#     ~/.ssh, .git, .claude, force push) and they fire on ~0.2% of calls.
+#   all -- deterministic asks defer too; only hard-deny (exit 2) survives.
 
 set -u
 
@@ -47,7 +54,7 @@ mock_classifier() {
   case "${AEGIS_TEST_MOCK_DECISION:-}" in
     allow) echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}'; exit 0 ;;
     deny)  echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"mock"}}'; exit 0 ;;
-    ask)   emit_ask '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask"}}' ;;
+    ask)   emit_classifier_ask '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask"}}' ;;
     *) return 1 ;;
   esac
 }
@@ -57,8 +64,21 @@ emit_allow() {
   exit 0
 }
 
-# Surface an ASK, or swallow it when ask_mode=defer. Always exits 0.
+# Surface an ASK from a DETERMINISTIC layer (bash-hard-ask, protected-paths,
+# the gatekeeper's ask exit). Swallowed only when ask_mode=defer AND
+# defer_scope=all. Always exits 0.
 emit_ask() {
+  if [ "$ASK_MODE" = "defer" ] && [ "$DEFER_SCOPE" = "all" ]; then
+    exit 0
+  fi
+  echo "$1"
+  exit 0
+}
+
+# Surface an ASK that stands in for the LLM classifier's verdict. Always
+# swallowed under ask_mode=defer regardless of defer_scope, matching what
+# classifier/decision.py does with a real verdict. Always exits 0.
+emit_classifier_ask() {
   if [ "$ASK_MODE" != "defer" ]; then
     echo "$1"
   fi
@@ -75,24 +95,17 @@ CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 . "$LIB/ask-mode.sh"
 ASK_MODE=$(aegis_resolve_ask_mode "$CWD")
 export AEGIS_ASK_MODE="$ASK_MODE"
+DEFER_SCOPE=$(aegis_resolve_defer_scope "$CWD")
+export AEGIS_DEFER_SCOPE="$DEFER_SCOPE"
 
-# Diag emitter for deterministic layers. Calls a python one-liner.
+# Diag emitter for the deterministic layers. Delegates to classifier.diagcli
+# so the [logging] diag_path and max_bytes settings govern these rows too;
+# this used to be an inline heredoc that hardcoded the default path, which
+# meant the bash layers and the classifier could log to different files.
 diag_emit() {
   local layer="$1" decision="$2" reason="$3" sess="$4" tool="$5"
-  python3 - "$sess" "$tool" "$layer" "$decision" "$reason" <<'PY'
-import sys, json, os, datetime, pathlib
-sess, tool, layer, decision, reason = sys.argv[1:]
-target = pathlib.Path(os.path.expanduser("~/.cache/aegis/decisions.jsonl"))
-target.parent.mkdir(parents=True, exist_ok=True)
-row = {
-    "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    "session_id": sess, "tool": tool, "layer": layer,
-    "decision": decision, "reason": reason, "model": None,
-    "latency_ms": 0, "tokens": None,
-}
-with target.open("a") as f:
-    f.write(json.dumps(row) + "\n")
-PY
+  env PYTHONPATH="$DIR" python3 -m classifier.diagcli \
+    "$sess" "$tool" "$layer" "$decision" "$reason" "${CWD:-}" 2>/dev/null || true
 }
 
 # Read-only / harmless tools: allow without any classifier.

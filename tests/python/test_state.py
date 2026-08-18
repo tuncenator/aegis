@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from pathlib import Path
 
@@ -66,3 +67,76 @@ def test_corrupt_file_is_recovered(tmp_state_dir):
     s = state.load("session-bad")
     assert s.session_id == "session-bad"
     assert s.enabled is True
+
+
+# --- pruning ----------------------------------------------------------------
+# One state file is written per Claude Code session and nothing removed them,
+# so ~/.cache/aegis/sessions grew to ~1k files in real use.
+
+def test_prune_removes_only_files_older_than_ttl(tmp_state_dir):
+    old = tmp_state_dir / "old.json"
+    new = tmp_state_dir / "new.json"
+    old.write_text("{}")
+    new.write_text("{}")
+    stale = time.time() - 30 * 86400
+    os.utime(old, (stale, stale))
+
+    assert state.prune(ttl_days=14) == 1
+    assert not old.exists()
+    assert new.exists()
+
+
+def test_prune_ignores_non_json_entries(tmp_state_dir):
+    stamp = tmp_state_dir / state.PRUNE_STAMP_NAME
+    stamp.write_text("")
+    stale = time.time() - 999 * 86400
+    os.utime(stamp, (stale, stale))
+    state.prune(ttl_days=1)
+    assert stamp.exists()
+
+
+def test_prune_ttl_zero_is_a_noop(tmp_state_dir):
+    p = tmp_state_dir / "s.json"
+    p.write_text("{}")
+    stale = time.time() - 999 * 86400
+    os.utime(p, (stale, stale))
+    assert state.prune(ttl_days=0) == 0
+    assert p.exists()
+
+
+def test_prune_if_due_runs_once_per_interval(tmp_state_dir):
+    p = tmp_state_dir / "s.json"
+    p.write_text("{}")
+    stale = time.time() - 999 * 86400
+    os.utime(p, (stale, stale))
+
+    assert state.prune_if_due(ttl_days=1) == 1
+    # Second call inside the interval is skipped, stamp still fresh.
+    other = tmp_state_dir / "s2.json"
+    other.write_text("{}")
+    os.utime(other, (stale, stale))
+    assert state.prune_if_due(ttl_days=1) == 0
+    assert other.exists()
+
+
+def test_prune_if_due_runs_again_once_the_interval_lapses(tmp_state_dir):
+    p = tmp_state_dir / "s.json"
+    p.write_text("{}")
+    stale = time.time() - 999 * 86400
+    os.utime(p, (stale, stale))
+    state.prune_if_due(ttl_days=1)
+
+    stamp = tmp_state_dir / state.PRUNE_STAMP_NAME
+    long_ago = time.time() - 2 * state.PRUNE_INTERVAL_S
+    os.utime(stamp, (long_ago, long_ago))
+
+    other = tmp_state_dir / "s2.json"
+    other.write_text("{}")
+    os.utime(other, (stale, stale))
+    assert state.prune_if_due(ttl_days=1) == 1
+    assert not other.exists()
+
+
+def test_prune_survives_a_missing_state_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(state, "STATE_DIR", tmp_path / "gone")
+    assert state.prune(ttl_days=1) == 0

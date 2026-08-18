@@ -133,6 +133,15 @@ trusted_services = []
 [logging]
 diag_path = "~/.cache/aegis/decisions.jsonl"
 level = "info"
+# Rotate the decision log to <path>.1 once it crosses this size. One
+# generation is kept; it is a debugging aid, not an audit trail.
+max_bytes = 33554432
+
+[state]
+# Delete per-session state files untouched for this long. One file is
+# written per Claude Code session, so without this the directory grows
+# without bound.
+session_ttl_days = 14
 
 [behavior]
 # What happens on an ASK verdict.
@@ -141,6 +150,16 @@ level = "info"
 #               decides instead of interrupting you. Hard denies and
 #               allows behave the same in both modes.
 ask_mode = "prompt"
+# Which asks defer when ask_mode = "defer". Ignored otherwise.
+#   "classifier" -- only the model's own ASK verdicts go silent. Aegis's
+#                   deterministic tripwires (writes to /etc, /usr/bin,
+#                   ~/.ssh, .git, .claude; force pushes) still prompt.
+#                   The auto-mode rule set has no system-path rules, so
+#                   deferring these would drop the check entirely. They
+#                   fire on roughly 0.2% of tool calls.
+#   "all"        -- deterministic asks defer too. Fewest interruptions;
+#                   Aegis keeps only its hard-deny (exit 2) teeth.
+defer_scope = "classifier"
 # What a classifier DENY verdict does (the snapshot's hard_deny section,
 # Data Exfiltration, arrives as a deny). A deny is never deferred.
 #   "prompt" -- downgrade to ASK and always surface it, you decide.

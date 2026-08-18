@@ -1,34 +1,70 @@
 #!/usr/bin/env bash
-# ask_mode end-to-end tests. Feeds orchestrator.sh the same PreToolUse JSON
-# shape Claude Code sends and asserts what reaches stdout.
+# ask_mode / defer_scope end-to-end tests. Feeds orchestrator.sh the same
+# PreToolUse JSON shape Claude Code sends and asserts what reaches stdout.
 #
 #   ask_mode = "prompt" (default) -> ASK verdicts emit permissionDecision:ask
 #   ask_mode = "defer"            -> ASK verdicts emit NOTHING, exit 0
+#
+#   defer_scope = "classifier" (default) -> under defer, only the LLM
+#       classifier's verdicts go silent. Aegis's deterministic tripwires
+#       (bash-hard-ask, protected-paths) still prompt: the auto-mode rule
+#       snapshot has no rules for /etc, /usr/bin, ~/.ssh, .git or .claude,
+#       so deferring them would drop the check entirely.
+#   defer_scope = "all"                  -> deterministic asks defer too.
 #
 # Deferring matters because a PreToolUse hook that returns "allow" or "ask"
 # short-circuits Claude Code's permission pipeline; only exit 0 with empty
 # stdout falls through to it, so the native auto-mode classifier decides.
 #
-# Hard denies (exit 2) and allows must be identical in both modes.
+# Hard denies (exit 2) and allows must be identical in every combination.
 #
-# Hermetic: no live model call. The classifier layer is exercised through
-# AEGIS_TEST_MOCK_DECISION, which orchestrator.sh honours in place of the
-# Python classifier.
+# Hermetic on two axes:
+#   - No live model call. The classifier layer is exercised through
+#     AEGIS_TEST_MOCK_DECISION, which orchestrator.sh honours in place of
+#     the Python classifier.
+#   - No developer state. HOME is stubbed and every AEGIS_* override is
+#     cleared, so the operator's own ~/.config/aegis/aegis.toml (which may
+#     well set ask_mode = "defer") cannot steer the assertions.
 
 set -u
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ORCH="$DIR/../../orchestrator.sh"
 
+# --- isolation --------------------------------------------------------------
+unset AEGIS_ASK_MODE AEGIS_DEFER_SCOPE AEGIS_HARD_DENY_ACTION AEGIS_TEST_MOCK_DECISION
+REAL_HOME="$HOME"
+STUB_HOME=$(mktemp -d)
+export HOME="$STUB_HOME"
+
 PASS=0; FAIL=0
 FAILS=()
 
-# Project config that turns deferral on, so the toml path is exercised and
-# not just the AEGIS_ASK_MODE env var.
-DEFER_CWD=$(mktemp -d)
-mkdir -p "$DEFER_CWD/.aegis"
-printf '[behavior]\nask_mode = "defer"\n' > "$DEFER_CWD/.aegis/aegis.toml"
-PROMPT_CWD=$(mktemp -d)
-trap 'rm -rf "$DEFER_CWD" "$PROMPT_CWD"' EXIT
+# One cwd per config combination, so the TOML path is exercised and not just
+# the env vars. An absent [behavior] table means the built-in defaults.
+mkcwd() {  # $1 = toml body ("" for none)
+  local dir; dir=$(mktemp -d)
+  if [ -n "$1" ]; then
+    mkdir -p "$dir/.aegis"
+    printf '%s\n' "$1" > "$dir/.aegis/aegis.toml"
+  fi
+  echo "$dir"
+}
+
+PROMPT_CWD=$(mkcwd "")
+DEFER_CWD=$(mkcwd '[behavior]
+ask_mode = "defer"')
+DEFER_ALL_CWD=$(mkcwd '[behavior]
+ask_mode = "defer"
+defer_scope = "all"')
+DEFER_CLS_CWD=$(mkcwd '[behavior]
+ask_mode = "defer"
+defer_scope = "classifier"')
+
+cleanup() {
+  export HOME="$REAL_HOME"
+  rm -rf "$STUB_HOME" "$PROMPT_CWD" "$DEFER_CWD" "$DEFER_ALL_CWD" "$DEFER_CLS_CWD"
+}
+trap cleanup EXIT
 
 payload() {
   # $1 = tool_name, $2 = key, $3 = value, $4 = cwd
@@ -53,41 +89,57 @@ assert() {
   fi
   if [ "$got" = "$want_out" ] && [ "$rc" = "$want_rc" ]; then
     PASS=$((PASS+1))
-    printf 'ok   %-46s stdout=%-5s exit=%s\n' "$name" "$got" "$rc"
+    printf 'ok   %-52s stdout=%-5s exit=%s\n' "$name" "$got" "$rc"
   else
     FAIL=$((FAIL+1))
     FAILS+=("$name: want stdout=$want_out exit=$want_rc, got stdout=$got exit=$rc")
-    printf 'FAIL %-46s want=%s/%s got=%s/%s\n' "$name" "$want_out" "$want_rc" "$got" "$rc"
+    printf 'FAIL %-52s want=%s/%s got=%s/%s\n' "$name" "$want_out" "$want_rc" "$got" "$rc"
   fi
 }
 
-FORCE_PUSH_PROMPT=$(payload Bash command 'git push --force origin feature-x' "$PROMPT_CWD")
-FORCE_PUSH_DEFER=$(payload Bash command 'git push --force origin feature-x' "$DEFER_CWD")
+force_push() { payload Bash command 'git push --force origin feature-x' "$1"; }
+etc_write()  { payload Edit file_path /etc/passwd "$1"; }
+novel()      { payload Bash command 'frobnicate --quux' "$1"; }
 
-echo "--- ask_mode = prompt (default) ---"
-assert "hard-ask: git push --force"        "$FORCE_PUSH_PROMPT" ask   0
-assert "protected path: Edit /etc/passwd"  "$(payload Edit file_path /etc/passwd "$PROMPT_CWD")" ask 0
+echo "--- ask_mode = prompt (default): everything asks ---"
+assert "hard-ask: git push --force"          "$(force_push "$PROMPT_CWD")" ask 0
+assert "protected path: Edit /etc/passwd"    "$(etc_write  "$PROMPT_CWD")" ask 0
 
-echo "--- ask_mode = defer (same commands) ---"
-assert "hard-ask: git push --force"        "$FORCE_PUSH_DEFER" empty 0
-assert "protected path: Edit /etc/passwd"  "$(payload Edit file_path /etc/passwd "$DEFER_CWD")" empty 0
+echo "--- ask_mode = defer, defer_scope default: deterministic asks survive ---"
+assert "hard-ask still prompts"              "$(force_push "$DEFER_CWD")" ask 0
+assert "protected path still prompts"        "$(etc_write  "$DEFER_CWD")" ask 0
+assert "explicit defer_scope=classifier"     "$(force_push "$DEFER_CLS_CWD")" ask 0
 
-echo "--- ask_mode = defer: deny and allow are unaffected ---"
-assert "hard-deny: rm -rf /"               "$(payload Bash command 'rm -rf /' "$DEFER_CWD")"  empty 2
-assert "allow: ls -la"                     "$(payload Bash command 'ls -la' "$DEFER_CWD")"    allow 0
-assert "allow: ls -la (prompt mode)"       "$(payload Bash command 'ls -la' "$PROMPT_CWD")"   allow 0
+echo "--- ask_mode = defer, defer_scope = all: deterministic asks go silent ---"
+assert "hard-ask defers"                     "$(force_push "$DEFER_ALL_CWD")" empty 0
+assert "protected path defers"               "$(etc_write  "$DEFER_ALL_CWD")" empty 0
+
+echo "--- deny and allow are unaffected by either setting ---"
+assert "hard-deny: rm -rf / (defer)"         "$(payload Bash command 'rm -rf /' "$DEFER_CWD")"     empty 2
+assert "hard-deny: rm -rf / (defer all)"     "$(payload Bash command 'rm -rf /' "$DEFER_ALL_CWD")" empty 2
+assert "allow: ls -la (defer)"               "$(payload Bash command 'ls -la' "$DEFER_CWD")"       allow 0
+assert "allow: ls -la (defer all)"           "$(payload Bash command 'ls -la' "$DEFER_ALL_CWD")"   allow 0
+assert "allow: ls -la (prompt)"              "$(payload Bash command 'ls -la' "$PROMPT_CWD")"      allow 0
 
 echo "--- classifier layer (mocked verdict, no live model) ---"
+# The classifier's own ASK defers under ask_mode=defer in BOTH scopes:
+# defer_scope only governs the deterministic layers.
 AEGIS_TEST_MOCK_DECISION=ask assert "classifier ask, prompt mode" \
-  "$(payload Bash command 'frobnicate --quux' "$PROMPT_CWD")" ask 0
-AEGIS_TEST_MOCK_DECISION=ask assert "classifier ask, defer mode" \
-  "$(payload Bash command 'frobnicate --quux' "$DEFER_CWD")" empty 0
+  "$(novel "$PROMPT_CWD")" ask 0
+AEGIS_TEST_MOCK_DECISION=ask assert "classifier ask, defer + scope=classifier" \
+  "$(novel "$DEFER_CWD")" empty 0
+AEGIS_TEST_MOCK_DECISION=ask assert "classifier ask, defer + scope=all" \
+  "$(novel "$DEFER_ALL_CWD")" empty 0
 AEGIS_TEST_MOCK_DECISION=allow assert "classifier allow, defer mode" \
-  "$(payload Bash command 'frobnicate --quux' "$DEFER_CWD")" allow 0
+  "$(novel "$DEFER_CWD")" allow 0
 
-echo "--- AEGIS_ASK_MODE env var overrides config ---"
-AEGIS_ASK_MODE=defer assert "env defer beats prompt-mode cwd" "$FORCE_PUSH_PROMPT" empty 0
-AEGIS_ASK_MODE=prompt assert "env prompt beats defer-mode cwd" "$FORCE_PUSH_DEFER" ask 0
+echo "--- env vars override config ---"
+AEGIS_ASK_MODE=defer AEGIS_DEFER_SCOPE=all assert "env defer+all beats prompt-mode cwd" \
+  "$(force_push "$PROMPT_CWD")" empty 0
+AEGIS_ASK_MODE=prompt assert "env prompt beats defer-mode cwd" \
+  "$(force_push "$DEFER_ALL_CWD")" ask 0
+AEGIS_DEFER_SCOPE=classifier assert "env scope=classifier beats cwd scope=all" \
+  "$(force_push "$DEFER_ALL_CWD")" ask 0
 
 # A classifier DENY is never deferred: the snapshot's hard_deny section
 # (Data Exfiltration) arrives as a deny, and deferring it would hand the call
@@ -99,40 +151,31 @@ AEGIS_ASK_MODE=prompt assert "env prompt beats defer-mode cwd" "$FORCE_PUSH_DEFE
 # synthesizes the deny verdict.
 echo "--- classifier DENY under ask_mode=defer (real classifier, no model) ---"
 deny_cwd() {
-  local dir action
-  dir=$(mktemp -d); action="$1"
-  mkdir -p "$dir/.aegis"
-  cat > "$dir/.aegis/aegis.toml" <<EOF
-[classifier]
-chain = [ { provider = "none", model = "unused", retries = 1, timeout_s = 1 } ]
-on_exhaustion = "deny"
+  mkcwd "[classifier]
+chain = [ { provider = \"none\", model = \"unused\", retries = 1, timeout_s = 1 } ]
+on_exhaustion = \"deny\"
 
 [behavior]
-ask_mode = "defer"
-hard_deny_action = "$action"
-EOF
-  echo "$dir"
+ask_mode = \"defer\"
+defer_scope = \"all\"
+hard_deny_action = \"$1\""
 }
 DENY_PROMPT_CWD=$(deny_cwd prompt)
 DENY_BLOCK_CWD=$(deny_cwd block)
-SESS_A="ask-mode-deny-prompt-$$-$RANDOM"
-SESS_B="ask-mode-deny-block-$$-$RANDOM"
 
-assert "deny surfaces as ask, not silence" \
-  "$(jq -nc --arg c "$DENY_PROMPT_CWD" --arg s "$SESS_A" \
-     '{session_id:$s,transcript_path:"/nonexistent.jsonl",cwd:$c,
-       hook_event_name:"PreToolUse",tool_name:"Bash",
-       tool_input:{command:"frobnicate --quux"}}')" ask 0
+deny_payload() {
+  jq -nc --arg c "$1" --arg s "ask-mode-deny-$2-$$-$RANDOM" \
+    '{session_id:$s,transcript_path:"/nonexistent.jsonl",cwd:$c,
+      hook_event_name:"PreToolUse",tool_name:"Bash",
+      tool_input:{command:"frobnicate --quux"}}'
+}
 
-assert "deny hard-blocks with hard_deny_action=block" \
-  "$(jq -nc --arg c "$DENY_BLOCK_CWD" --arg s "$SESS_B" \
-     '{session_id:$s,transcript_path:"/nonexistent.jsonl",cwd:$c,
-       hook_event_name:"PreToolUse",tool_name:"Bash",
-       tool_input:{command:"frobnicate --quux"}}')" empty 2
+# defer_scope = "all" is deliberate here: even the most permissive deferral
+# setting must not swallow a deny.
+assert "deny surfaces as ask, not silence" "$(deny_payload "$DENY_PROMPT_CWD" a)" ask   0
+assert "deny hard-blocks with action=block" "$(deny_payload "$DENY_BLOCK_CWD" b)" empty 2
 
 rm -rf "$DENY_PROMPT_CWD" "$DENY_BLOCK_CWD"
-rm -f "$HOME/.cache/aegis/sessions/$SESS_A.json" \
-      "$HOME/.cache/aegis/sessions/$SESS_B.json" 2>/dev/null || true
 
 echo "----"
 echo "PASS=$PASS FAIL=$FAIL"

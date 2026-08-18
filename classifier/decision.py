@@ -49,11 +49,14 @@ def to_hook_output(d: Decision, ask_mode: str = "prompt") -> str:
 
     Classifier-emitted DENY is downgraded to ASK so the user always has
     an override path; the classifier's reason is surfaced as the ASK
-    prompt text. The only hard-block channel is the deterministic
-    bash-denylist layer, which exits the orchestrator with rc=2 before
-    this function runs. State counters and the diagnostic log still see
-    the classifier's original verdict, so deny-storms can still auto-
-    pause the session even though each individual ASK is overridable.
+    prompt text. State counters and the diagnostic log still see the
+    classifier's original verdict, so deny-storms can still auto-pause
+    the session even though each individual ASK is overridable.
+
+    Two channels bypass this downgrade and hard-block with rc=2: the
+    deterministic bash-denylist layer, which exits the orchestrator
+    before this function is ever reached, and surface() below when the
+    operator sets hard_deny_action = "block".
 
     With ask_mode="defer" an ASK surfaces as the empty string instead:
     the caller writes nothing and exits 0, which is the only hook result

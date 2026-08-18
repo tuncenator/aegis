@@ -32,6 +32,21 @@ GLOBAL_CONFIG_PATH = Path.home() / ".config" / "aegis" / "aegis.toml"
 # Hard denies (exit 2) and allows are unaffected by this setting.
 ASK_MODES = ("prompt", "defer")
 
+# [behavior] defer_scope -- WHICH asks defer when ask_mode = "defer".
+# Ignored when ask_mode = "prompt".
+#   "classifier" (default): only the LLM classifier's own ASK verdicts
+#            defer. Aegis's deterministic tripwires (bash-hard-ask,
+#            protected-paths, the gatekeeper's ASK exit) still prompt.
+#            They are curated, low-volume, and cover ground the auto-mode
+#            snapshot has no rules for at all: writes to /etc, /usr/bin,
+#            ~/.ssh, .git, .claude, and force pushes.
+#   "all":   every ASK defers, deterministic layers included. Fewest
+#            interruptions; Aegis keeps only its hard-deny (exit 2) teeth.
+# Resolution lives in lib/ask-mode.sh because only the bash layers act on
+# it; it is parsed here so `aegis status` can report the effective value
+# and so an invalid value is rejected in one place.
+DEFER_SCOPES = ("classifier", "all")
+
 # [behavior] hard_deny_action -- what a classifier DENY verdict does. The
 # snapshot's hard_deny section (Data Exfiltration) reaches the classifier
 # as a DENY, and a DENY is never deferred in either setting: ask_mode
@@ -76,8 +91,11 @@ class Config:
     trusted_buckets: list[str] = field(default_factory=list)
     trusted_services: list[str] = field(default_factory=list)
     diag_path: str = "~/.cache/aegis/decisions.jsonl"
+    diag_max_bytes: int = 32 * 1024 * 1024
     log_level: str = "info"
+    session_ttl_days: int = 14
     ask_mode: str = "prompt"
+    defer_scope: str = "classifier"
     hard_deny_action: str = "prompt"
 
 
@@ -142,11 +160,17 @@ def load_config(project_dir: str | None) -> Config:
 
         log = raw.get("logging", {})
         cfg.diag_path = log.get("diag_path", cfg.diag_path)
+        cfg.diag_max_bytes = log.get("max_bytes", cfg.diag_max_bytes)
         cfg.log_level = log.get("level", cfg.log_level)
+
+        stt = raw.get("state", {})
+        cfg.session_ttl_days = stt.get("session_ttl_days", cfg.session_ttl_days)
 
         beh = raw.get("behavior", {})
         if beh.get("ask_mode") in ASK_MODES:
             cfg.ask_mode = beh["ask_mode"]
+        if beh.get("defer_scope") in DEFER_SCOPES:
+            cfg.defer_scope = beh["defer_scope"]
         if beh.get("hard_deny_action") in HARD_DENY_ACTIONS:
             cfg.hard_deny_action = beh["hard_deny_action"]
 
@@ -155,6 +179,8 @@ def load_config(project_dir: str | None) -> Config:
     # the classifier is reached through a different cwd.
     if os.environ.get("AEGIS_ASK_MODE") in ASK_MODES:
         cfg.ask_mode = os.environ["AEGIS_ASK_MODE"]
+    if os.environ.get("AEGIS_DEFER_SCOPE") in DEFER_SCOPES:
+        cfg.defer_scope = os.environ["AEGIS_DEFER_SCOPE"]
     if os.environ.get("AEGIS_HARD_DENY_ACTION") in HARD_DENY_ACTIONS:
         cfg.hard_deny_action = os.environ["AEGIS_HARD_DENY_ACTION"]
 

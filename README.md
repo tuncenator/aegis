@@ -70,11 +70,10 @@ activates. Verify with `/aegis-status`.
 ### OpenCode
 
 `install.sh` also symlinks the OpenCode plugin to
-`~/.config/opencode/plugins/aegis.js`, but only when OpenCode is present on
-the machine. Restart OpenCode after install so it loads the plugin. The
-plugin keeps Claude Code compatibility untouched: it normalizes OpenCode
-permission requests into Aegis's existing hook payload, runs
-`orchestrator.sh`, then maps Aegis's allow/ask/deny back to OpenCode.
+`~/.config/opencode/plugins/aegis.js`. Restart OpenCode after install so it
+loads the plugin. The plugin keeps Claude Code compatibility untouched: it
+normalizes OpenCode permission requests into Aegis's existing hook payload,
+runs `orchestrator.sh`, then maps Aegis's allow/ask/deny back to OpenCode.
 
 Project-local copies can use `.opencode/plugins/aegis.js` directly. OpenCode
 commands are available as `.opencode/commands/aegis-status.md`,
@@ -154,9 +153,7 @@ Unaffected by this setting:
 - the diagnostic log still records the verdict Aegis reached, so a
   deferred ask is still visible in `~/.cache/aegis/decisions.jsonl`.
 
-What *does* defer: genuine ambiguity. That includes the deterministic
-hard-ask patterns (force push, `curl | shell`, ssh to prod-named hosts,
-protected paths) and the classifier's own `ask` verdicts.
+What *does* defer is governed by `defer_scope`, below.
 
 The mode is resolved once per hook invocation by `orchestrator.sh`
 (project toml overrides global toml, and an `AEGIS_ASK_MODE` environment
@@ -166,6 +163,42 @@ Python classifier agree.
 `defer` hands the ambiguous middle to Anthropic's classifier, which is
 laxer than an explicit human prompt. Keep `prompt` if you want to see
 every ambiguous call.
+
+### `defer_scope`: which asks defer
+
+```toml
+[behavior]
+ask_mode    = "defer"
+defer_scope = "classifier"   # or "all"
+```
+
+Only meaningful when `ask_mode = "defer"`.
+
+`classifier` (default) defers only the LLM classifier's own `ask`
+verdicts. Aegis's deterministic tripwires still prompt: the hard-ask
+patterns in `lib/bash-hard-ask.sh` (force push, push to the default
+branch, `curl | shell`, AI attribution in commit messages) and the
+protected paths in `lib/protected-paths.sh` (`/etc`, `/usr/bin`, `/bin`,
+`/sbin`, `/var/log`, `~/.ssh`, `.git`, `.claude`, `.vscode`, shell
+rc files).
+
+`all` defers those too. Aegis then keeps only its hard-deny (exit 2)
+teeth, and everything else is Anthropic's call.
+
+Why `classifier` is the default, in two facts:
+
+- The auto-mode rule snapshot contains **no system-path rules at all**.
+  Nothing in `allow`, `soft_deny`, `hard_deny` or `environment` mentions
+  `/etc`, `/usr/bin` or `~/.ssh`, so a deferred `Edit /etc/passwd` is not
+  guaranteed to be caught by anything downstream. Aegis's protected-paths
+  layer is the only check covering that ground.
+- They are cheap. Measured over 242k real decisions: protected-paths
+  fired 426 times and bash-hard-ask 86 times, together 0.21% of calls, or
+  roughly one prompt per 470 tool calls. The classifier's own asks (640)
+  are the volume that `defer` is actually there to absorb.
+
+Resolution matches `ask_mode`: project toml over global toml, with
+`AEGIS_DEFER_SCOPE` overriding both.
 
 ### `hard_deny_action`: what a classifier deny does
 
@@ -195,6 +228,31 @@ worth being explicit about:
 The system prompt still describes DENY as a hard block. Under the default
 `prompt` it is not one; that wording predates this setting.
 
+### Housekeeping
+
+```toml
+[logging]
+max_bytes = 33554432   # rotate decisions.jsonl at 32 MiB
+
+[state]
+session_ttl_days = 14  # drop per-session files untouched this long
+```
+
+Both defaults exist because both files grew without bound in real use:
+the decision log reached 70 MB across 242k rows, and
+`~/.cache/aegis/sessions/` accumulated ~1k files, one per Claude Code
+session.
+
+The log rotates to `<path>.1` when it crosses `max_bytes`, keeping one
+generation; set `max_bytes = 0` to disable. Session pruning runs at most
+once a day from the classifier (guarded by a `.prune-stamp` in the state
+directory) so it never costs a directory walk in the hook's latency path.
+Force it with `aegis prune [--ttl-days N]`.
+
+Deleting a session file is harmless: an unknown session id loads as a
+fresh `SessionState`, so the worst case is that a still-live session's
+deny counters reset.
+
 ## Toggles
 
 In-session slash commands:
@@ -208,6 +266,13 @@ CLI:
 - `aegis on [--session ID]`
 - `aegis off [--session ID]`
 - `aegis refresh-rules` (re-fetch the Anthropic rule snapshot)
+- `aegis prune [--ttl-days N]` (drop stale per-session state files)
+
+`aegis status` also reports the effective `ask_mode`, `defer_scope`,
+`hard_deny_action` and `on_exhaustion`, the age of the rule snapshot
+against its TTL, and the size of the decision log. Under
+`ask_mode = "defer"` Aegis writes nothing on an ask, so this is the only
+place its behavior is visible.
 
 ## Diagnostics
 
@@ -215,7 +280,12 @@ Every decision is logged as one JSONL row to
 `~/.cache/aegis/decisions.jsonl` with timestamp, session, tool, layer,
 decision, model, latency, and reason. The log records the classifier's
 *original* verdict even when the hook output downgraded a deny to ask,
-so you can audit what the model actually thought.
+so you can audit what the model actually thought. A deferred ask is
+logged too, so `defer` never means invisible.
+
+Both the deterministic layers and the Python classifier write through
+`classifier/diag.py`, so `[logging] diag_path` and `max_bytes` govern
+every row. The log rotates to `decisions.jsonl.1`; see Housekeeping.
 
 ## Standalone bash-only mode
 

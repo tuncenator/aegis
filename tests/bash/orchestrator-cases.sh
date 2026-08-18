@@ -1,10 +1,22 @@
 #!/usr/bin/env bash
 # End-to-end orchestrator tests. Pipes various PreToolUse JSON shapes through
 # orchestrator.sh and asserts the layer dispatch is correct.
+#
+# These cases assert Aegis's DEFAULT behavior (ask_mode = "prompt"), so the
+# run must not inherit the developer's own settings: an operator config with
+# [behavior] ask_mode = "defer" turns every expected ask into a silent
+# fall-through. HOME is stubbed and every AEGIS_* override is cleared below.
+# Stubbing HOME also keeps the one live-classifier case off the network,
+# since provider credentials live under the real HOME.
 
 set -u
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ORCH="$DIR/../../orchestrator.sh"
+
+unset AEGIS_ASK_MODE AEGIS_DEFER_SCOPE AEGIS_HARD_DENY_ACTION
+STUB_HOME=$(mktemp -d)
+export HOME="$STUB_HOME"
+trap 'rm -rf "$STUB_HOME"' EXIT
 
 PASS=0; FAIL=0
 FAILS=()
@@ -57,8 +69,9 @@ assert "git push -f"  '{"tool_name":"Bash","tool_input":{"command":"git push --f
 assert "Edit /etc"    '{"tool_name":"Edit","tool_input":{"file_path":"/etc/passwd"}}' ask 0
 
 # Bash unrecognized: falls to classifier. With AEGIS_TEST_MOCK_DECISION=ask the harness
-# sees "ask"; unmocked, the real classifier may return any of allow|deny|ask depending on
-# what the model thinks of "foobar quux", so we accept all three when running live.
+# sees "ask"; unmocked, the chain exhausts under the stubbed HOME (no provider
+# credentials) and on_exhaustion synthesizes an ask. Any of allow|deny|ask is
+# accepted so the case still holds if someone runs it against a live chain.
 # session_id is unique-per-run to avoid persistent state (auto-pause from prior denies)
 # silently neutering this case into a fall-through.
 NOVEL_SESS="orch-test-novel-$$-$RANDOM"

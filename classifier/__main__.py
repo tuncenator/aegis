@@ -103,6 +103,9 @@ def main() -> int:
         total_limit=cfg.total_deny_limit,
     )
     state.save(sess)
+    # Housekeeping, at most once a day and never fatal: one state file is
+    # written per session and nothing else removes them.
+    state.prune_if_due(cfg.session_ttl_days)
 
     diag.emit(
         cfg.diag_path,
@@ -113,6 +116,7 @@ def main() -> int:
         reason=d.reason,
         model=used_model,
         latency_ms=int((time.time() - t0) * 1000),
+        max_bytes=cfg.diag_max_bytes,
     )
 
     # In ask_mode="defer" an ASK surfaces as the empty string, so nothing
