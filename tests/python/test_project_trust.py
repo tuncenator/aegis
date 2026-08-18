@@ -426,3 +426,65 @@ def test_project_config_cannot_overwrite_the_global_config(tmp_path):
 
     assert victim.read_text() == '[behavior]\nhard_deny_action = "block"\n'
     assert not victim.with_name("aegis.toml.1").exists()
+
+
+# --- the pre-verdict window ------------------------------------------------
+# Everything main() touches before decision.surface() runs is a fail-open
+# surface: an exception there exits the hook 1 with empty stdout, which Claude
+# Code reads as an ignored hook error. The config file was hardened first; the
+# files next door were not. All of these are checked into a repository.
+
+def _hard_block_home(tmp_path):
+    home = tmp_path / "home"
+    (home / ".config" / "aegis").mkdir(parents=True)
+    (home / ".config" / "aegis" / "aegis.toml").write_text(
+        '[classifier]\n'
+        'chain = [ { provider = "none", model = "unused", retries = 1, timeout_s = 1 } ]\n'
+        'on_exhaustion = "deny"\n\n'
+        '[behavior]\nhard_deny_action = "block"\n')
+    return home
+
+
+@pytest.mark.parametrize("body,label", [
+    (b"# notes \xe7\xff\xfe\n", "invalid-utf8"),
+    (b"\xff\xfe", "bom-only-garbage"),
+    (b"\x00\x00\x00", "nul-bytes"),
+    (b"", "empty"),
+])
+def test_undecodable_claude_md_still_hard_blocks(tmp_path, body, label):
+    """One 0xE7 byte in a checked-in CLAUDE.md used to turn layer 4 off for the
+    whole repo: Path.read_text raised UnicodeDecodeError, which is not an
+    OSError, so it escaped main()."""
+    home = _hard_block_home(tmp_path)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "CLAUDE.md").write_bytes(body)
+    r = _run_classifier(proj, home, {
+        "session_id": f"claudemd-{label}", "transcript_path": "/nonexistent.jsonl",
+        "cwd": str(proj), "tool_name": "Bash", "tool_input": {"command": "frobnicate"}})
+    assert r.returncode == 2, f"{label}: rc={r.returncode} stderr={r.stderr[:400]}"
+
+
+def test_undecodable_transcript_still_hard_blocks(tmp_path):
+    home = _hard_block_home(tmp_path)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    tr = proj / "transcript.jsonl"
+    tr.write_bytes(b'{"type":"user","message":{"content":"hi \xe7\xff"}}\n')
+    r = _run_classifier(proj, home, {
+        "session_id": "transcript-badutf8", "transcript_path": str(tr),
+        "cwd": str(proj), "tool_name": "Bash", "tool_input": {"command": "frobnicate"}})
+    assert r.returncode == 2, f"rc={r.returncode} stderr={r.stderr[:400]}"
+
+
+def test_claude_md_is_not_read_when_disabled(tmp_path):
+    """include_claude_md = false is meant to keep repo-controlled prose out of
+    the gate's prompt. It was checked downstream only, so the file was still
+    read -- the setting kept the text out of the prompt but not the repo's
+    bytes out of the process."""
+    from classifier import __main__ as main_mod
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "CLAUDE.md").write_text("project instructions")
+    assert main_mod._read_claude_md(str(proj), True) == "project instructions"
+    assert main_mod._read_claude_md(str(proj), False) is None

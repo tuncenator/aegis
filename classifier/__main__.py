@@ -31,16 +31,45 @@ def _call_provider(spec: rules.ProviderSpec, system: str, user: str) -> str | No
     return None
 
 
-def _read_claude_md(cwd: str | None) -> str | None:
-    if not cwd:
-        return None
-    p = Path(cwd) / "CLAUDE.md"
-    if not p.exists():
-        return None
+def _read_regular_text(p: Path) -> str | None:
+    """Read a path only if it is a REGULAR file, tolerating any content.
+
+    Two failure modes this closes, both reachable from a checked-in file in
+    whatever repository the agent has open:
+
+    - A FIFO (or a symlink to one) blocks open(2) forever. Git cannot store a
+      FIFO but it can store a symlink to one, and a build step can create one.
+      The hook then hangs until Claude Code's timeout, which is an ignored
+      hook error, i.e. the gate disappears -- and an orphaned reader is left
+      holding the pipe.
+    - Bytes that are not valid UTF-8 raise UnicodeDecodeError, which is not an
+      OSError. Anything escaping here exits the hook 1 with empty stdout,
+      another ignored hook error. One 0xE7 byte was enough.
+
+    errors="replace" rather than a bail-out: mojibake in a prompt is harmless,
+    losing the gate is not.
+    """
     try:
-        return p.read_text()
-    except OSError:
+        if not p.is_file():          # False for FIFOs, directories, sockets
+            return None
+        with p.open("r", encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except Exception:
         return None
+
+
+def _read_claude_md(cwd: str | None, include: bool) -> str | None:
+    """Read <cwd>/CLAUDE.md, or None.
+
+    `include` is checked HERE, not just downstream in prompt.build_user_prompt:
+    the call site passes this result as an argument, so the file was being read
+    even when the operator had set include_claude_md = false. That made a
+    setting meant to keep repo-controlled prose out of the gate's own prompt
+    fail to keep the repo's bytes out of the gate's process.
+    """
+    if not cwd or not include:
+        return None
+    return _read_regular_text(Path(cwd) / "CLAUDE.md")
 
 
 def main() -> int:
@@ -76,7 +105,8 @@ def main() -> int:
     pending = {"tool_name": payload.get("tool_name"), "tool_input": payload.get("tool_input", {})}
 
     sys_p = prompt.build_system_prompt(snap, cfg)
-    usr_p = prompt.build_user_prompt(parsed, pending, _read_claude_md(cwd), cfg, cwd=cwd)
+    usr_p = prompt.build_user_prompt(
+        parsed, pending, _read_claude_md(cwd, cfg.include_claude_md), cfg, cwd=cwd)
 
     raw_response: str | None = None
     used_model: str | None = None

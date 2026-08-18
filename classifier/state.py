@@ -38,24 +38,63 @@ def _path(session_id: str) -> Path:
     return STATE_DIR / f"{session_id}.json"
 
 
+def _coerce(default: SessionState, data: dict) -> SessionState:
+    """Build a SessionState from untrusted JSON, field by field.
+
+    A half-written or hand-edited file used to reach record_decision with the
+    wrong types -- {"consecutive_denies": "3"} raised TypeError on the += and
+    exited the hook 1, an ignored hook error. Every field is type-checked
+    against the default rather than splatted in.
+    """
+    out = SessionState(session_id=default.session_id)
+    if isinstance(data.get("enabled"), bool):
+        out.enabled = data["enabled"]
+    for field_name in ("consecutive_denies", "total_denies"):
+        v = data.get(field_name)
+        if isinstance(v, int) and not isinstance(v, bool) and v >= 0:
+            setattr(out, field_name, v)
+    for field_name in ("paused_reason", "last_decision_at"):
+        v = data.get(field_name)
+        if isinstance(v, str) or v is None:
+            setattr(out, field_name, v)
+    return out
+
+
 def load(session_id: str) -> SessionState:
+    """Never raises. Corrupt, unreadable or wrong-typed state loads as default.
+
+    Regular files only: a FIFO here would block open(2) and wedge the hook
+    until Claude Code's timeout, which is itself a fail-open.
+    """
+    default = SessionState(session_id=session_id)
     p = _path(session_id)
-    if not p.exists():
-        return SessionState(session_id=session_id)
     try:
-        data = json.loads(p.read_text())
-        return SessionState(**{**asdict(SessionState(session_id=session_id)), **data})
-    except (json.JSONDecodeError, OSError, TypeError):
-        # Corrupt or unreadable: fall back to defaults and rewrite on next save.
-        return SessionState(session_id=session_id)
+        if not p.is_file():
+            return default
+        with p.open("r", encoding="utf-8", errors="replace") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return default
+        return _coerce(default, data)
+    except Exception:
+        return default
 
 
 def save(s: SessionState) -> None:
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    """Never raises. A read-only HOME or a full disk must not break a decision.
+
+    The counters are an optimisation for the deny-storm auto-pause, not part
+    of the verdict, so losing a write is survivable; exiting the hook non-zero
+    from here would not be.
+    """
     s.last_decision_at = datetime.now(timezone.utc).isoformat()
-    tmp = _path(s.session_id).with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(asdict(s), indent=2))
-    os.replace(tmp, _path(s.session_id))
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = _path(s.session_id).with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(asdict(s), indent=2))
+        os.replace(tmp, _path(s.session_id))
+    except Exception:
+        pass
 
 
 def record_decision(
