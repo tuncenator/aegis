@@ -82,6 +82,23 @@ else
   echo "note: ~/.local/bin doesn't exist; add $DIR/bin to PATH yourself or 'mkdir ~/.local/bin && rerun'"
 fi
 
+# 4b. OpenCode adapter, only when OpenCode is actually installed. Creating
+# ~/.config/opencode on a machine that has never run OpenCode is litter, and
+# the Claude Code path does not need any of it.
+if command -v opencode >/dev/null 2>&1 || [ -d "$HOME/.config/opencode" ]; then
+  OPENCODE_PLUGIN_DIR="$HOME/.config/opencode/plugins"
+  mkdir -p "$OPENCODE_PLUGIN_DIR"
+  ensure_symlink "$DIR/.opencode/plugins/aegis.js" "$OPENCODE_PLUGIN_DIR/aegis.js" "OpenCode plugin"
+  OPENCODE_COMMAND_DIR="$HOME/.config/opencode/commands"
+  mkdir -p "$OPENCODE_COMMAND_DIR"
+  ensure_symlink "$DIR/.opencode/commands/aegis-status.md" "$OPENCODE_COMMAND_DIR/aegis-status.md" "OpenCode status command"
+  ensure_symlink "$DIR/.opencode/commands/aegis-on.md" "$OPENCODE_COMMAND_DIR/aegis-on.md" "OpenCode on command"
+  ensure_symlink "$DIR/.opencode/commands/aegis-off.md" "$OPENCODE_COMMAND_DIR/aegis-off.md" "OpenCode off command"
+  OPENCODE_INSTALLED=1
+else
+  OPENCODE_INSTALLED=0
+fi
+
 # 5. Write a starter config if missing.
 CONFIG_DIR="$HOME/.config/aegis"
 if [ ! -f "$CONFIG_DIR/aegis.toml" ]; then
@@ -116,6 +133,43 @@ trusted_services = []
 [logging]
 diag_path = "~/.cache/aegis/decisions.jsonl"
 level = "info"
+# Rotate the decision log to <path>.1 once it crosses this size. One
+# generation is kept; it is a debugging aid, not an audit trail.
+max_bytes = 33554432
+
+[state]
+# Delete per-session state files untouched for this long. One file is
+# written per Claude Code session, so without this the directory grows
+# without bound.
+session_ttl_days = 14
+
+[behavior]
+# NOTE ON LAYERING: a per-project <repo>/.aegis/aegis.toml may only ratchet
+# these toward the stricter value ("prompt", "classifier", "block"). It lives
+# inside whatever repository the agent has open, so it is untrusted; every
+# other table below is global-only. See the README's Trust model section.
+#
+# What happens on an ASK verdict.
+#   "prompt" -- surface it, Claude Code prompts you.
+#   "defer"  -- emit nothing, so Claude Code's own auto-mode classifier
+#               decides instead of interrupting you. Hard denies and
+#               allows behave the same in both modes.
+ask_mode = "prompt"
+# Which asks defer when ask_mode = "defer". Ignored otherwise.
+#   "classifier" -- only the model's own ASK verdicts go silent. Aegis's
+#                   deterministic tripwires (writes to /etc, /usr/bin,
+#                   ~/.ssh, .git, .claude; force pushes) still prompt.
+#                   The auto-mode rule set has no system-path rules, so
+#                   deferring these would drop the check entirely. They
+#                   fire on roughly 0.2% of tool calls.
+#   "all"        -- deterministic asks defer too. Fewest interruptions;
+#                   Aegis keeps only its hard-deny (exit 2) teeth.
+defer_scope = "classifier"
+# What a classifier DENY verdict does (the snapshot's hard_deny section,
+# Data Exfiltration, arrives as a deny). A deny is never deferred.
+#   "prompt" -- downgrade to ASK and always surface it, you decide.
+#   "block"  -- exit 2, a real hard block with no override.
+hard_deny_action = "prompt"
 EOF
   echo "Wrote starter config: $CONFIG_DIR/aegis.toml"
 else
@@ -211,3 +265,6 @@ echo "  /plugin marketplace add $DIR"
 echo "  /plugin install aegis@aegis"
 echo
 echo "Then restart Claude Code so the PreToolUse hook activates."
+if [ "${OPENCODE_INSTALLED:-0}" = 1 ]; then
+  echo "For OpenCode, restart opencode so ~/.config/opencode/plugins/aegis.js loads."
+fi

@@ -134,8 +134,13 @@ def parse(transcript_path: str, last_user_n: int) -> ParsedTranscript:
     pending_by_id: dict[str, ToolUse] = {}
     approved_counts: dict[tuple[str, str], int] = {}
 
+    # Regular files only, and tolerant of any bytes: the transcript path comes
+    # in on the hook payload, and an undecodable line used to raise
+    # UnicodeDecodeError past the OSError guard below, exiting the hook 1.
     try:
-        with p.open() as f:
+        if not p.is_file():
+            return ParsedTranscript()
+        with p.open("r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -168,7 +173,7 @@ def parse(transcript_path: str, last_user_n: int) -> ParsedTranscript:
                             tu_id = c.get("id")
                             if tu_id:
                                 pending_by_id[tu_id] = tu
-    except OSError:
+    except Exception:
         return ParsedTranscript()
 
     prior = [PriorApproval(tool=t, signature=s, count=n)

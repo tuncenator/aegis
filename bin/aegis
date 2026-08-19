@@ -13,6 +13,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+from classifier import rules as rl  # noqa: E402
 from classifier import state as st  # noqa: E402
 
 # Allow tests to redirect state directory.
@@ -30,18 +31,73 @@ def _most_recent_session() -> str | None:
     return files[0].stem
 
 
+def _human_bytes(n: float) -> str:
+    if n < 1024:
+        return f"{n:.0f} B"
+    for unit in ("KiB", "MiB", "GiB"):
+        n /= 1024
+        if n < 1024 or unit == "GiB":
+            return f"{n:.1f} {unit}"
+    return f"{n:.1f} GiB"
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     sid = args.session or _most_recent_session()
-    if not sid:
+    cfg = rl.load_config(os.getcwd())
+
+    if sid:
+        s = st.load(sid)
+        print(f"Session {s.session_id}")
+        print(f"  enabled: {s.enabled}")
+        print(f"  consecutive_denies: {s.consecutive_denies}")
+        print(f"  total_denies: {s.total_denies}")
+        print(f"  paused_reason: {s.paused_reason}")
+        print(f"  last_decision_at: {s.last_decision_at}")
+    else:
         print("no active session")
-        return 0
-    s = st.load(sid)
-    print(f"Session {s.session_id}")
-    print(f"  enabled: {s.enabled}")
-    print(f"  consecutive_denies: {s.consecutive_denies}")
-    print(f"  total_denies: {s.total_denies}")
-    print(f"  paused_reason: {s.paused_reason}")
-    print(f"  last_decision_at: {s.last_decision_at}")
+
+    # Under ask_mode=defer Aegis writes nothing on an ASK, so this is the
+    # only place the effective behavior is visible.
+    print("Behavior")
+    print(f"  ask_mode: {cfg.ask_mode}")
+    if cfg.ask_mode == "defer":
+        print(f"  defer_scope: {cfg.defer_scope}", end="")
+        if cfg.defer_scope == "classifier":
+            print("  (deterministic hard-asks still prompt)")
+        else:
+            print("  (deterministic hard-asks defer too)")
+    print(f"  hard_deny_action: {cfg.hard_deny_action}")
+    print(f"  on_exhaustion: {cfg.on_exhaustion}")
+    # A project config is untrusted: it can only ratchet toward stricter
+    # values. Worth naming so a setting that "isn't taking effect" is
+    # explicable rather than mysterious.
+    proj = Path(os.getcwd()) / ".aegis" / "aegis.toml"
+    if proj.exists():
+        print(f"  project config: {proj} (untrusted, may only tighten)")
+
+    print("Rules")
+    age = rl.snapshot_age_days()
+    if age == float("inf"):
+        print("  snapshot: MISSING METADATA (run: aegis refresh-rules)")
+    else:
+        stale = age > cfg.snapshot_ttl_days
+        flag = "  STALE -- run: aegis refresh-rules" if stale else ""
+        print(f"  snapshot age: {age:.1f}d (ttl {cfg.snapshot_ttl_days}d){flag}")
+
+    log = Path(os.path.expanduser(cfg.diag_path))
+    size = log.stat().st_size if log.exists() else 0
+    print(f"  decision log: {_human_bytes(size)} of {_human_bytes(cfg.diag_max_bytes)} "
+          f"({log})")
+    n_sessions = len(list(st.STATE_DIR.glob("*.json"))) if st.STATE_DIR.exists() else 0
+    print(f"  session files: {n_sessions} (ttl {cfg.session_ttl_days}d)")
+    return 0
+
+
+def cmd_prune(args: argparse.Namespace) -> int:
+    cfg = rl.load_config(os.getcwd())
+    ttl = args.ttl_days if args.ttl_days is not None else cfg.session_ttl_days
+    removed = st.prune(ttl)
+    print(f"pruned {removed} session file(s) older than {ttl}d from {st.STATE_DIR}")
     return 0
 
 
@@ -110,6 +166,10 @@ def main() -> int:
 
     sp = sub.add_parser("refresh-rules")
     sp.set_defaults(func=cmd_refresh_rules)
+
+    sp = sub.add_parser("prune", help="delete stale per-session state files")
+    sp.add_argument("--ttl-days", type=int, default=None)
+    sp.set_defaults(func=cmd_prune)
 
     args = p.parse_args()
     return args.func(args)
