@@ -1,6 +1,23 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 -- 2026-08-19
+
+Hardens Aegis against being switched off. Nine ways the gate could silently
+disappear were found and fixed, most of them reachable from a file checked
+into whatever repository the agent has open. Adds `defer_scope`, so handing
+the ambiguous middle to Claude Code's native auto mode no longer means giving
+up Aegis's own deterministic tripwires.
+
+### Breaking
+
+- **A project `<cwd>/.aegis/aegis.toml` may now only ratchet toward stricter
+  values.** Keys outside `[context]`, `snapshot_ttl_days` and the three
+  `[behavior]` ratchets are read from the global config only, and a project
+  file setting them is silently ignored rather than honoured. If you relied on
+  a project config to set the provider chain, counters, logging, state TTL or
+  trusted environment, move those to `~/.config/aegis/aegis.toml`. `aegis
+  status` names a project config when one is present. See the README's Trust
+  model section for the reasoning.
 
 ### Security
 
