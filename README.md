@@ -42,8 +42,9 @@ Edit / Write / NotebookEdit:
   protected-paths (ASK if /etc, ~/.ssh, etc.)
   -> classifier
 
-Read / Glob / Grep / TodoWrite / TaskCreate / Agent / Task /
-WebFetch / WebSearch / TodoWrite:
+Read / Glob / Grep / TodoWrite / WebFetch / WebSearch /
+TaskCreate / TaskUpdate / TaskList / TaskGet / TaskOutput / TaskStop /
+Agent / Task:
   ALLOW immediately (no classifier)
 ```
 
@@ -70,8 +71,11 @@ activates. Verify with `/aegis-status`.
 ### OpenCode
 
 `install.sh` also symlinks the OpenCode plugin to
-`~/.config/opencode/plugins/aegis.js`. Restart OpenCode after install so it
-loads the plugin. The plugin keeps Claude Code compatibility untouched: it
+`~/.config/opencode/plugins/aegis.js`, but only when OpenCode is present:
+`command -v opencode` succeeds, or `~/.config/opencode` already exists.
+Creating that tree on a machine that has never run OpenCode is litter, and
+nothing in the Claude Code path needs it. Restart OpenCode after install so
+it loads the plugin. The plugin keeps Claude Code compatibility untouched: it
 normalizes OpenCode permission requests into Aegis's existing hook payload,
 runs `orchestrator.sh`, then maps Aegis's allow/ask/deny back to OpenCode.
 
@@ -116,8 +120,8 @@ automatically if `GEMINI_API_KEY` is in your environment when you run it.
 
 **Claude Haiku** (fallback): authenticates through the existing Claude CLI
 login (OAuth/session), not an env var. No extra setup needed. Note that the
-default 8s timeout may be too short on some systems (e.g., Termux with proot);
-increase `timeout_s` in `aegis.toml` if Haiku times out as fallback.
+default 12s timeout may be too short on some systems (e.g., Termux with
+proot); increase `timeout_s` in `aegis.toml` if Haiku times out as fallback.
 
 ## Configuration
 
@@ -171,10 +175,16 @@ max_bytes = 1                    # rename your global config away and
                                  # overwrite it with a log row
 ```
 
-Every value is also type-checked, in both layers. A malformed `max_bytes`
-used to raise inside the decision log writer, which runs *before* the verdict
-is surfaced, so a configured hard block exited 1 (an ignored hook error)
-instead of 2.
+Every value is type-checked, and every loader is total: config, rule
+snapshot, transcript, `CLAUDE.md` and session state all degrade to safe
+defaults rather than raising. This matters more than it sounds. All of them
+are read *before* the verdict is surfaced, and any exit code other than 0 or
+2 is read by Claude Code as an ignored hook error, so an exception there
+removes the gate silently. A malformed `max_bytes`, or one byte of non-UTF-8
+in a checked-in `CLAUDE.md`, was enough to do it.
+
+`orchestrator.sh` also runs `python3 -P`, so a repository shipping its own
+`classifier/` package cannot shadow the real one and answer for it.
 
 Writes to Aegis's own config and install tree are gated by
 `lib/bash-hard-ask.sh` for Bash and `lib/protected-paths.sh` for
@@ -219,10 +229,17 @@ Unaffected by this setting:
 
 What *does* defer is governed by `defer_scope`, below.
 
-The mode is resolved once per hook invocation by `orchestrator.sh`
-(project toml overrides global toml, and an `AEGIS_ASK_MODE` environment
-variable overrides both) and exported so the deterministic layers and the
-Python classifier agree.
+`orchestrator.sh` resolves the mode once per hook invocation and exports it,
+so the deterministic shell layers and the Python classifier cannot disagree.
+Precedence is `AEGIS_ASK_MODE` in the environment, then the project file
+(which may only ratchet, per the trust model above), then the global file.
+
+Resolution goes through `tomllib`, the same loader the classifier uses.
+`lib/ask-mode.sh` used to hand-parse the file in awk, which read
+configuration out of string *content*: a `defer_scope = "all"` sitting inside
+a comment or a multi-line string switched off the deterministic tripwires
+while `aegis status` reported them active. One parser makes that class of
+divergence structurally impossible.
 
 `defer` hands the ambiguous middle to Anthropic's classifier, which is
 laxer than an explicit human prompt. Keep `prompt` if you want to see
@@ -243,8 +260,8 @@ verdicts. Aegis's deterministic tripwires still prompt: the hard-ask
 patterns in `lib/bash-hard-ask.sh` (force push, push to the default
 branch, `curl | shell`, AI attribution in commit messages) and the
 protected paths in `lib/protected-paths.sh` (`/etc`, `/usr/bin`, `/bin`,
-`/sbin`, `/var/log`, `~/.ssh`, `.git`, `.claude`, `.vscode`, shell
-rc files).
+`/sbin`, `/var/log`, `~/.ssh`, `.git`, `.claude`, `.vscode`, `.idea`,
+`.husky`, shell rc files, and Aegis's own config and install tree).
 
 `all` defers those too. Aegis then keeps only its hard-deny (exit 2)
 teeth, and everything else is Anthropic's call.
@@ -261,8 +278,9 @@ Why `classifier` is the default, in two facts:
   roughly one prompt per 470 tool calls. The classifier's own asks (640)
   are the volume that `defer` is actually there to absorb.
 
-Resolution matches `ask_mode`: project toml over global toml, with
-`AEGIS_DEFER_SCOPE` overriding both.
+Resolution matches `ask_mode`: `AEGIS_DEFER_SCOPE`, then the project file
+(ratchet only, so a project can ask for `classifier` but never `all`), then
+the global file.
 
 ### `hard_deny_action`: what a classifier deny does
 
