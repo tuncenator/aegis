@@ -1,5 +1,64 @@
 # Changelog
 
+## 1.2.1 -- 2026-09-08
+
+Documentation only; no behavior change. The README is rewritten against what
+the code actually does. Auditing it against the source found 27 stale or false
+claims and 18 behaviors documented nowhere.
+
+The largest correction is the framing. Aegis was described as a replacement for
+Claude Code's `auto` mode that "never invokes" it. In fact the two compose, and
+four paths hand a call to native auto mode: `ask_mode = "defer"`, a disabled
+session, a hook error, and any tool family Aegis does not match. The README
+already leaned on that fallback when accepting the self-write residual, so it
+contradicted itself.
+
+Five figures were added: where Aegis sits relative to auto mode, the measured
+traffic split, the layer pipeline, the `ask_mode` / `defer_scope` decision tree,
+and what `/aegis-off` actually leaves running.
+
+### Newly documented
+
+- The deny-storm auto-pause, which disables the classifier after 3 consecutive
+  or 20 total denies.
+- `~/.cache/aegis/errors.jsonl`, the unrotated provider-failure log, and the
+  only place chain exhaustion is visible.
+- `[classifier] on_exhaustion`, including that `allow` auto-approves every
+  classified call during a provider outage.
+- `AEGIS_HARD_DENY_ACTION`, and that the live hook honours
+  `AEGIS_TEST_MOCK_DECISION`.
+- Prior-approval recall, shipped in 1.1.0 and unmentioned since.
+- `include_claude_md` defaulting to `true`, so the open repository's own
+  `CLAUDE.md` reaches the gate's own prompt unless the operator opts out.
+- What leaves the machine on every classified call.
+- The `.aegis/hard-ask.toml` format, which is not TOML-parsed.
+- The OpenCode plugin rewriting the host's permission config on load.
+- `GATEKEEPER_DEBUG=1`.
+
+### Corrected
+
+- Gemini goes through the `google-genai` SDK, not the CLI, and an environment
+  variable beats `~/.gemini/.env` rather than the reverse.
+- `/aegis-off` disables only the LLM classifier. The four deterministic layers
+  keep running, so a disabled session still auto-allows most Bash.
+- `aegis status` prints `defer_scope` only under `ask_mode = "defer"`.
+- `uv sync` is required, and `aegis status` runs clean over a dead classifier.
+- The rule snapshot does mention `/etc` and `/usr`; what it has no rule *keyed*
+  on is a system path.
+- Aegis is now stricter than the snapshot on pushes to the default branch.
+- Hit rates re-measured on a current log. The old "one prompt per 470 calls"
+  predates the wider self-write gating in 1.2.0.
+- `<cwd>/.aegis/`, not `<repo>/.aegis/`: no loader walks up to the repo root.
+- `[logging] level` is parsed and never used.
+- The slash commands only work when cwd is the Aegis repo.
+- Standalone bash-only mode needs all three Bash layers, not two.
+
+### Known drift, not fixed here
+
+`plugin/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` still
+carry `1.1.0`. They were not bumped for 1.2.0 either, and no release commit has
+ever touched them.
+
 ## 1.2.0 -- 2026-08-19
 
 Hardens Aegis against being switched off. Nine ways the gate could silently
