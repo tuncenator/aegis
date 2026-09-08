@@ -572,7 +572,7 @@ Two logs, and only one of them is configurable.
 
 | File | Contents | Rotated? |
 |---|---|---|
-| `~/.cache/aegis/decisions.jsonl` | One row per decision: timestamp, session, tool, layer, decision, model, latency, reason, cwd | Yes, at `max_bytes` |
+| `~/.cache/aegis/decisions.jsonl` | One row per decision: `ts`, `session_id`, `tool`, `layer`, `decision`, `reason`, `model`, `latency_ms`, `tokens` | Yes, at `max_bytes` |
 | `~/.cache/aegis/errors.jsonl` | Every provider failure: timeout, HTTP error, empty response, missing key | **No.** Hardcoded path, grows without bound |
 
 `errors.jsonl` is the only place chain exhaustion is visible, so it is the first
