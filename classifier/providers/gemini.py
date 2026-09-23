@@ -48,13 +48,18 @@ def call(spec: ProviderSpec, system: str, user: str) -> str | None:
         api_key=key,
         http_options=types.HttpOptions(timeout=timeout_ms),
     )
-    cfg = types.GenerateContentConfig(
-        system_instruction=system,
-        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL),
-        temperature=0.0,
-    )
+    def _cfg(level: types.ThinkingLevel) -> types.GenerateContentConfig:
+        return types.GenerateContentConfig(
+            system_instruction=system,
+            thinking_config=types.ThinkingConfig(thinking_level=level),
+            temperature=0.0,
+        )
 
-    for attempt in range(max(1, spec.retries)):
+    cfg = _cfg(types.ThinkingLevel.MINIMAL)
+    downgraded = False
+
+    attempt = 0
+    while attempt < max(1, spec.retries):
         try:
             resp = client.models.generate_content(
                 model=spec.model,
@@ -62,15 +67,24 @@ def call(spec: ProviderSpec, system: str, user: str) -> str | None:
                 config=cfg,
             )
         except genai_errors.APIError as e:
+            # Newer models (e.g. gemini-3.8-flash) reject MINIMAL with a 400;
+            # LOW is their floor. Retry once at LOW without spending an attempt.
+            if not downgraded and "Thinking level MINIMAL is not supported" in str(e):
+                cfg = _cfg(types.ThinkingLevel.LOW)
+                downgraded = True
+                continue
             _log_error(spec.provider, spec.model, attempt + 1, f"api_error: {e}")
+            attempt += 1
             continue
         except (TimeoutError, ConnectionError) as e:
             _log_error(spec.provider, spec.model, attempt + 1, f"{type(e).__name__}: {e}")
+            attempt += 1
             continue
 
         text = (resp.text or "").strip()
         if not text:
             _log_error(spec.provider, spec.model, attempt + 1, "empty response")
+            attempt += 1
             continue
         return text
     return None
