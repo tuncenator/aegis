@@ -165,6 +165,22 @@ for _probe in "${DBG_PROBES[@]}"; do
   fi
 done
 
+# Portability guard: the hooks also run on macOS, where BSD sed has no -z and
+# rejects GNU label syntax (:a;N;$!ba). There such a pipeline prints nothing,
+# the quote-neutralized command comes out empty, and compound commands
+# hard-allow. GNU sed never shows the failure, so check the source instead
+# (comment lines excluded).
+_gnu_sed=$(grep -nE 'sed[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*-[a-zA-Z]*z|:a;N;\$!ba' "$LIB"/*.sh \
+  | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#')
+if [ -z "$_gnu_sed" ]; then
+  PASS=$((PASS + 1))
+else
+  while IFS= read -r _hit; do
+    FAIL=$((FAIL + 1))
+    FAIL_LINES+=("portability: GNU-only sed (breaks on macOS): $_hit")
+  done <<< "$_gnu_sed"
+fi
+
 if [ "${#FAIL_LINES[@]}" -gt 0 ]; then
   echo "FAILURES:"
   printf '  %s\n' "${FAIL_LINES[@]}"
