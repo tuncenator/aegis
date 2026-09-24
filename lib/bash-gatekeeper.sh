@@ -507,7 +507,7 @@ fi
 # segment walker treats each continuation line (which starts with a flag)
 # as a standalone command that no rule matches.
 if [[ "$CMD" == *$'\\\n'* ]]; then
-  CMD=$(printf '%s' "$CMD" | sed -E ':a;N;$!ba;s/\\\n[[:space:]]*/ /g')
+  CMD=$(printf '%s' "$CMD" | perl -0777 -pe 's/\\\n[[:space:]]*/ /g')
   dbg "normalized backslash-newline continuations: $CMD"
 fi
 
@@ -528,7 +528,7 @@ HAS_SUBSHELL=false
 # neutralizer regex.  Collapse \\ first (so a literal backslash followed
 # by a real quote-opener like `\\'` doesn't look like an escaped quote),
 # then replace \' (from $'...') and \" (from "...") with a placeholder.
-_cmd_noquotes=$(printf '%s' "$CMD" | sed -E 's/\\\\/__BS__/g' | sed -E 's/\\['"'"'"]/__ESCQ__/g' | sed -z -E "s/'[^']*'/__Q__/g" | sed -z -E 's/"[^"]*"/__Q__/g')
+_cmd_noquotes=$(printf '%s' "$CMD" | sed -E 's/\\\\/__BS__/g' | sed -E 's/\\['"'"'"]/__ESCQ__/g' | perl -0777 -pe "s/'[^']*'/__Q__/g" | perl -0777 -pe 's/"[^"]*"/__Q__/g')
 _cmd_noquotes=$(printf '%s' "$_cmd_noquotes" | sed -E 's/(^|[[:space:]])#.*$//')
 if echo "$_cmd_noquotes" | grep -qE '`|\$\(|<\(|>\(' ; then
   HAS_SUBSHELL=true
@@ -589,11 +589,12 @@ if [ "$IS_COMPOUND" = true ] && [ "$HAS_SUBSHELL" = false ]; then
   # treated as shell operators.
   ALL_SAFE=true
   # Replace single-quoted and double-quoted content with placeholders before splitting
-  # Use sed -z to handle multi-line quoted strings (e.g. mongosh --eval '...')
+  # Use perl -0777 (slurp mode) so multi-line quoted strings (e.g. mongosh --eval '...')
+  # are neutralized as one unit. Not sed -z: BSD sed (macOS) has no -z.
   # Pre-pass: protect backslash-escaped quotes (\' inside $'...', \" inside "...")
   # so they don't mis-pair the regex below.  Collapse \\ first so `\\'` (literal
   # backslash + real quote-opener) is not mistaken for an escaped quote.
-  _neutralized=$(printf '%s' "$CMD" | sed -E 's/\\\\/__BS__/g' | sed -E 's/\\['"'"'"]/__ESCQ__/g' | sed -z -E "s/'[^']*'/__Q__/g" | sed -z -E 's/"[^"]*"/__Q__/g')
+  _neutralized=$(printf '%s' "$CMD" | sed -E 's/\\\\/__BS__/g' | sed -E 's/\\['"'"'"]/__ESCQ__/g' | perl -0777 -pe "s/'[^']*'/__Q__/g" | perl -0777 -pe 's/"[^"]*"/__Q__/g')
   # Strip shell redirections before splitting so that 2>&1 etc. don't
   # cause false splits on the & operator.  The target character class
   # excludes shell separators (; | & < > ( )) so e.g. `2>/dev/null;` keeps
@@ -706,7 +707,7 @@ if echo "$_first" | grep -qE '^[[:space:]]*sshpass[[:space:]]' && \
   _fg_safe=true
 
   # First line: every pipe segment after the sshpass one must pass is_safe_cmd.
-  _first_neutralized=$(printf '%s' "$_first" | sed -z -E "s/'[^']*'/__Q__/g" | sed -z -E 's/"[^"]*"/__Q__/g')
+  _first_neutralized=$(printf '%s' "$_first" | perl -0777 -pe "s/'[^']*'/__Q__/g" | perl -0777 -pe 's/"[^"]*"/__Q__/g')
   _seg_idx=0
   while IFS= read -r _seg; do
     _seg_idx=$((_seg_idx+1))
