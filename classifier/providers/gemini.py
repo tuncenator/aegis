@@ -52,7 +52,8 @@ def call(spec: ProviderSpec, system: str, user: str) -> str | None:
         return types.GenerateContentConfig(
             system_instruction=system,
             thinking_config=types.ThinkingConfig(thinking_level=level),
-            temperature=0.0,
+            # No temperature/top_p/top_k: ignored since Gemini 3.6 Flash and
+            # rejected with 400 by upcoming models.
         )
 
     cfg = _cfg(types.ThinkingLevel.MINIMAL)
