@@ -164,6 +164,10 @@ survive. `aegis status` will *not* tell you this: the CLI imports only
 `classifier.rules` and `classifier.state`, so it prints a clean report over a
 dead classifier.
 
+On macOS also `brew install coreutils`: the protected-paths hook needs GNU
+`realpath -m` and uses `grealpath` when the system `realpath` lacks it. Without
+it every Edit and Write asks.
+
 `install.sh` then:
 
 1. Removes legacy plugin symlinks from earlier installs.
