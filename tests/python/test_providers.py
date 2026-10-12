@@ -85,6 +85,52 @@ def test_gemini_retries_on_api_error(monkeypatch):
     assert "allow" in out
 
 
+def _minimal_unsupported_error():
+    from google.genai import errors as genai_errors
+
+    return genai_errors.APIError(
+        400,
+        {"error": {"code": 400, "status": "INVALID_ARGUMENT",
+                   "message": "Thinking level MINIMAL is not supported for this model. "
+                              "Please retry with other thinking level."}},
+        None,
+    )
+
+
+def test_gemini_downgrades_to_low_when_minimal_unsupported(monkeypatch):
+    from google.genai import types
+
+    monkeypatch.setattr(gemini, "_resolve_api_key", lambda: "fake-key")
+    final = MagicMock(text='{"decision":"allow","reason":"ok"}')
+    fake_models = MagicMock()
+    fake_models.generate_content = MagicMock(side_effect=[_minimal_unsupported_error(), final])
+    fake_client = MagicMock()
+    fake_client.models = fake_models
+    monkeypatch.setattr(gemini.genai, "Client", MagicMock(return_value=fake_client))
+
+    # retries=1: the downgrade must not spend the only attempt.
+    spec = ProviderSpec("gemini", "gemini-3.8-flash", retries=1, timeout_s=5)
+    out = gemini.call(spec, system="s", user="u")
+    assert "allow" in out
+    levels = [c.kwargs["config"].thinking_config.thinking_level
+              for c in fake_models.generate_content.call_args_list]
+    assert levels == [types.ThinkingLevel.MINIMAL, types.ThinkingLevel.LOW]
+
+
+def test_gemini_downgrade_happens_only_once(monkeypatch):
+    monkeypatch.setattr(gemini, "_resolve_api_key", lambda: "fake-key")
+    fake_models = MagicMock()
+    fake_models.generate_content = MagicMock(side_effect=_minimal_unsupported_error())
+    fake_client = MagicMock()
+    fake_client.models = fake_models
+    monkeypatch.setattr(gemini.genai, "Client", MagicMock(return_value=fake_client))
+
+    spec = ProviderSpec("gemini", "m", retries=2, timeout_s=5)
+    assert gemini.call(spec, system="s", user="u") is None
+    # 1 downgrade + 2 counted attempts; no infinite loop.
+    assert fake_models.generate_content.call_count == 3
+
+
 def test_gemini_returns_none_when_exhausted(monkeypatch):
     _patch_gemini_client(monkeypatch, response_text="")
     spec = ProviderSpec("gemini", "m", retries=2, timeout_s=5)
