@@ -189,6 +189,15 @@ gcloud storage ls gs://bucket
 bq show ds.table
 bq ls myproject:dataset
 
+# --- cloud read-only inside a chain (every segment must pass) ---
+aws s3 ls | grep foo
+AWS_PROFILE=x aws ec2 describe-instances | jq .
+aws s3 ls 2>/dev/null
+gcloud alpha compute instances list
+gcloud compute instances describe foo --zone us-central1-a
+aws s3api get-object-acl --bucket b --key k
+aws s3api head-object --bucket b --key k
+
 # --- docker read-only ---
 docker ps
 docker images

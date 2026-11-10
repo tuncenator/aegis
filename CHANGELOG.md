@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.2.2 -- 2026-11-10
+
+Security fixes to the bash gatekeeper. Each one let a command skip the
+classifier and run with no prompt.
+
+### Fixed
+
+- **BSD sed (macOS) failing open** (PR #2, Adil Eren). Four `sed -z` / GNU
+  label calls printed nothing under BSD sed, so the quote-neutralized command
+  came out empty and every compound command or `$(...)` was hard-allowed.
+  They now use `perl -0777`. A source check in `tests/bash/run.sh` fails on
+  any GNU-only `sed` coming back.
+- **Fail closed on broken text tools.** If the continuation join or a quote
+  neutralizer prints nothing, the gatekeeper now stays silent instead of
+  allowing, and a compound command with zero segments is never allowed.
+  The test suite shadows `perl` and `sed` with failing stubs to prove it.
+- **Cloud rules allowed chained commands.** The AWS / GCP read-only rules
+  looked only at the start of the command line, so `aws s3 ls && <anything>`,
+  `aws s3 ls $(...)` and `bq ls | sh` were allowed. They now run per segment
+  inside `is_safe_cmd`.
+- **gcloud read word anywhere.** `gcloud compute instances delete foo list`
+  matched the read-only rule. The read verb must now follow 1 to 3 group
+  words, and no word in the raw command may be a write verb (checked raw
+  because the flag stripper eats the word after `--quiet` and similar).
+- **`aws s3api get-object` writes a file.** `get-*` matched it, letting it
+  overwrite any path. Positional words after an AWS verb are now refused,
+  as are the known file-writing `get-*` verbs.
+
+### Housekeeping
+
+- `plugin.json` and `marketplace.json` now carry the release version
+  (they were stuck at `1.1.0`, see 1.2.1).
+
 ## 1.2.1 -- 2026-09-08
 
 Documentation only; no behavior change. The README is rewritten against what

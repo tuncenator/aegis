@@ -76,20 +76,24 @@ esac
 # second follows every existing symlink prefix, including a dangling final
 # alias, so an alternate name that points into a protected tree also asks.
 # -m permits a write target or any suffix after the alias not to exist yet.
-if ! PATH_LEXICAL=$(realpath -ms -- "$PATH_ABSOLUTE" 2>/dev/null); then
+# Both are GNU options; macOS's realpath lacks them, so use Homebrew
+# coreutils' grealpath there. Without either, every write asks.
+REALPATH=realpath
+realpath -m -- / >/dev/null 2>&1 || REALPATH=grealpath
+if ! PATH_LEXICAL=$("$REALPATH" -ms -- "$PATH_ABSOLUTE" 2>/dev/null); then
   ask "cannot normalize write target"
 fi
-if ! PATH_RESOLVED=$(realpath -m -- "$PATH_ABSOLUTE" 2>/dev/null); then
+if ! PATH_RESOLVED=$("$REALPATH" -m -- "$PATH_ABSOLUTE" 2>/dev/null); then
   ask "cannot resolve write target"
 fi
 
 # Resolve the install itself once so plugin and command symlinks cannot make
 # the protected root depend on how this hook was invoked.
 AEGIS_ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
-if ! GLOBAL_AEGIS_ROOT=$(realpath -m -- "$HOME/.config/aegis" 2>/dev/null); then
+if ! GLOBAL_AEGIS_ROOT=$("$REALPATH" -m -- "$HOME/.config/aegis" 2>/dev/null); then
   ask "cannot resolve global Aegis config"
 fi
-if ! PROJECT_AEGIS_ROOT=$(realpath -m -- "$CWD_EXPANDED/.aegis" 2>/dev/null); then
+if ! PROJECT_AEGIS_ROOT=$("$REALPATH" -m -- "$CWD_EXPANDED/.aegis" 2>/dev/null); then
   ask "cannot resolve project Aegis config"
 fi
 

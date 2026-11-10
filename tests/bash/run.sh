@@ -165,6 +165,50 @@ for _probe in "${DBG_PROBES[@]}"; do
   fi
 done
 
+# Portability guard: the hooks also run on macOS, where BSD sed has no -z and
+# rejects GNU label syntax (:a;N;$!ba). There such a pipeline prints nothing,
+# the quote-neutralized command comes out empty, and compound commands
+# hard-allow. GNU sed never shows the failure, so check the source instead
+# (comment lines excluded).
+_gnu_sed=$(grep -nE 'sed[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*-[a-zA-Z]*z|:a;N;\$!ba' "$LIB"/*.sh \
+  | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#')
+if [ -z "$_gnu_sed" ]; then
+  PASS=$((PASS + 1))
+else
+  while IFS= read -r _hit; do
+    FAIL=$((FAIL + 1))
+    FAIL_LINES+=("portability: GNU-only sed (breaks on macOS): $_hit")
+  done <<< "$_gnu_sed"
+fi
+
+# Fail-closed guard: if a text tool the gatekeeper shells out to is broken,
+# it must not hard-allow. Shadow perl / sed with stubs that print nothing and
+# fail (what BSD sed did with -z), then check dangerous commands stay
+# un-allowed.
+_broken_dir=$(mktemp -d)
+FAILCLOSED_PROBES=(
+  'ls /tmp && rm -rf /tmp'
+  'echo $(rm -rf /tmp)'
+  'sleep 1; rm -rf /tmp'
+  $'ls /tmp \\\n  && rm -rf /tmp'
+)
+for _tool in perl sed; do
+  rm -f "$_broken_dir"/*
+  printf '#!/bin/sh\nexit 1\n' > "$_broken_dir/$_tool"
+  chmod +x "$_broken_dir/$_tool"
+  for _probe in "${FAILCLOSED_PROBES[@]}"; do
+    _out=$(jq -n --arg c "$_probe" '{tool_input:{command:$c}}' \
+      | PATH="$_broken_dir:$PATH" "$GATEKEEPER" 2>/dev/null)
+    if echo "$_out" | grep -q '"permissionDecision":"allow"'; then
+      FAIL=$((FAIL + 1))
+      FAIL_LINES+=("fail-closed: broken $_tool still allowed: $_probe")
+    else
+      PASS=$((PASS + 1))
+    fi
+  done
+done
+rm -rf "$_broken_dir"
+
 if [ "${#FAIL_LINES[@]}" -gt 0 ]; then
   echo "FAILURES:"
   printf '  %s\n' "${FAIL_LINES[@]}"

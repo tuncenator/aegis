@@ -164,6 +164,10 @@ survive. `aegis status` will *not* tell you this: the CLI imports only
 `classifier.rules` and `classifier.state`, so it prints a clean report over a
 dead classifier.
 
+On macOS also `brew install coreutils`: the protected-paths hook needs GNU
+`realpath -m` and uses `grealpath` when the system `realpath` lacks it. Without
+it every Edit and Write asks.
+
 `install.sh` then:
 
 1. Removes legacy plugin symlinks from earlier installs.
@@ -572,7 +576,7 @@ Two logs, and only one of them is configurable.
 
 | File | Contents | Rotated? |
 |---|---|---|
-| `~/.cache/aegis/decisions.jsonl` | One row per decision: timestamp, session, tool, layer, decision, model, latency, reason, cwd | Yes, at `max_bytes` |
+| `~/.cache/aegis/decisions.jsonl` | One row per decision: `ts`, `session_id`, `tool`, `layer`, `decision`, `reason`, `model`, `latency_ms`, `tokens` | Yes, at `max_bytes` |
 | `~/.cache/aegis/errors.jsonl` | Every provider failure: timeout, HTTP error, empty response, missing key | **No.** Hardcoded path, grows without bound |
 
 `errors.jsonl` is the only place chain exhaustion is visible, so it is the first

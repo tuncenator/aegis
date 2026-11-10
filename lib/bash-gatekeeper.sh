@@ -34,6 +34,17 @@ if [ -z "$CMD" ]; then
 fi
 dbg "input: $CMD"
 
+# Fail closed when a text-rewriting step breaks.  The quote neutralizer and
+# continuation join below never turn a non-empty command into an empty one,
+# so empty output means the tool failed (missing perl, a GNU-only sed flag
+# on macOS, ...).  Carrying on with an empty string would leave the segment
+# walker nothing to reject and hard-allow the command.  Exit silently so the
+# normal permission flow decides instead.
+bail_unsure() {
+  dbg "decision: silent fall-through ($1 produced no output -- not trusting the analysis)"
+  exit 0
+}
+
 # ---------------------------------------------------------------------------
 # is_db_write -- returns 0 if the database command contains write operations,
 # 1 otherwise (appears read-only).  Checked against the full command string.
@@ -159,6 +170,78 @@ strip_wrapper_args() {
     break
   done
   echo "$cmd"
+}
+
+# ---------------------------------------------------------------------------
+# is_safe_cloud_cmd -- read-only AWS / GCP commands.  Called from is_safe_cmd
+# on ONE command (env vars already stripped), never on a whole command line:
+# the rules only look at the start of the string, so `aws s3 ls && <anything>`
+# would otherwise pass.  As part of is_safe_cmd, a chain is allowed only when
+# every other segment passes too.
+# ---------------------------------------------------------------------------
+is_safe_cloud_cmd() {
+  local cmd="$1" stripped
+  case "$cmd" in aws\ *|gcloud\ *|gsutil\ *|bq\ *) ;; *) return 1 ;; esac
+  # Drop --flag and --flag=value tokens so only positional words remain.
+  stripped=$(echo "$cmd" | sed -E 's/--[a-zA-Z0-9_-]+([ =][^ ]*)?//g' | tr -s ' ')
+
+  # Words that change state, on their own or as a hyphenated prefix
+  # (delete, delete-instances, add-iam-policy-binding, ...).  Checked against
+  # every non-flag word of the RAW command, not just $stripped: the flag
+  # stripper also eats the word after a boolean flag (`--quiet delete`), so
+  # a write verb could hide from $stripped.  A false hit only means a prompt.
+  local write_re='^(create|recreate|delete|update|set|unset|add|remove|deploy|ssh|scp|start|stop|reset|restart|reboot|resize|resume|suspend|import|export|move|patch|replace|enable|disable|cancel|abandon|run|submit|execute|exec|attach|detach|restore|rollback|undelete|deprecate|activate|login|revoke|purge|send|publish|apply|clear|copy|cp|rm|mv|rsync|upload|download|migrate|promote|failover|switchover|simulate|rotate|sign|encrypt|decrypt|connect|tag|untag)(-[a-z0-9-]*)?$'
+  local _w _raw_words
+  read -ra _raw_words <<< "$cmd"
+
+  # AWS: aws <service> <read-only-verb>, nothing else positional.  A
+  # positional word after the verb is an output file (s3api get-object
+  # <outfile>), so anchor the end.  The flag stripper can eat that file
+  # after a boolean flag, so also refuse the known file-writing get-* verbs.
+  for _w in "${_raw_words[@]}"; do
+    case "$_w" in
+      get-object|get-object-torrent|get-job-output|get-media|get-clip|get-snapshot-block)
+        dbg "is_safe_cloud_cmd: AWS $_w writes a local file -> reject"; return 1 ;;
+    esac
+  done
+  if echo "$stripped" | grep -qE '^aws [a-z0-9-]+ (describe|list|get|head)-[a-z0-9-]+ ?$'; then
+    dbg "is_safe_cloud_cmd: AWS read-only verb describe|list|get|head-"; return 0
+  fi
+  if echo "$stripped" | grep -qE '^aws (s3 ls|sts get-caller-identity)( |$)'; then
+    dbg "is_safe_cloud_cmd: aws s3 ls / sts get-caller-identity"; return 0
+  fi
+
+  # GCP gcloud: gcloud <1 to 3 group words> <read verb> [args].  The group
+  # words come before the command word, so a write word there means the
+  # command is a write (`gcloud compute instances delete foo list`).
+  if [ "${_raw_words[0]}" = gcloud ]; then
+    for _w in "${_raw_words[@]:1}"; do
+      case "$_w" in -*) continue ;; esac
+      if [[ "$_w" =~ $write_re ]]; then
+        dbg "is_safe_cloud_cmd: gcloud write word '$_w' -> reject"; return 1
+      fi
+    done
+    local _gw _i
+    read -ra _gw <<< "$stripped"
+    for ((_i = 1; _i < ${#_gw[@]}; _i++)); do
+      case "${_gw[$_i]}" in describe|list|get|get-iam-policy) break ;; esac
+    done
+    if [ "$_i" -ge 2 ] && [ "$_i" -le 4 ] && [ "$_i" -lt "${#_gw[@]}" ]; then
+      dbg "is_safe_cloud_cmd: gcloud read-only verb ${_gw[$_i]} after $((_i - 1)) group word(s)"; return 0
+    fi
+  fi
+  if echo "$stripped" | grep -qE '^gcloud (config list|config get|info|auth list|projects list|projects describe)'; then
+    dbg "is_safe_cloud_cmd: gcloud config/info/auth/projects read-only"; return 0
+  fi
+
+  # GCP gsutil / gcloud storage / bq
+  if echo "$stripped" | grep -qE '^(gsutil|gcloud storage) (ls|cat|stat)'; then
+    dbg "is_safe_cloud_cmd: gsutil/gcloud storage ls|cat|stat"; return 0
+  fi
+  if echo "$stripped" | grep -qE '^bq (show|ls)'; then
+    dbg "is_safe_cloud_cmd: bq show|ls"; return 0
+  fi
+  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -477,6 +560,10 @@ is_safe_cmd() {
     return 0
   fi
 
+  if is_safe_cloud_cmd "$cmd"; then
+    return 0
+  fi
+
   dbg "is_safe_cmd: no rule matched -> reject"
   return 1
 }
@@ -507,7 +594,8 @@ fi
 # segment walker treats each continuation line (which starts with a flag)
 # as a standalone command that no rule matches.
 if [[ "$CMD" == *$'\\\n'* ]]; then
-  CMD=$(printf '%s' "$CMD" | sed -E ':a;N;$!ba;s/\\\n[[:space:]]*/ /g')
+  CMD=$(printf '%s' "$CMD" | perl -0777 -pe 's/\\\n[[:space:]]*/ /g')
+  [ -n "$CMD" ] || bail_unsure "continuation join"
   dbg "normalized backslash-newline continuations: $CMD"
 fi
 
@@ -528,7 +616,8 @@ HAS_SUBSHELL=false
 # neutralizer regex.  Collapse \\ first (so a literal backslash followed
 # by a real quote-opener like `\\'` doesn't look like an escaped quote),
 # then replace \' (from $'...') and \" (from "...") with a placeholder.
-_cmd_noquotes=$(printf '%s' "$CMD" | sed -E 's/\\\\/__BS__/g' | sed -E 's/\\['"'"'"]/__ESCQ__/g' | sed -z -E "s/'[^']*'/__Q__/g" | sed -z -E 's/"[^"]*"/__Q__/g')
+_cmd_noquotes=$(printf '%s' "$CMD" | sed -E 's/\\\\/__BS__/g' | sed -E 's/\\['"'"'"]/__ESCQ__/g' | perl -0777 -pe "s/'[^']*'/__Q__/g" | perl -0777 -pe 's/"[^"]*"/__Q__/g')
+[ -n "$_cmd_noquotes" ] || bail_unsure "subshell-check quote neutralizer"
 _cmd_noquotes=$(printf '%s' "$_cmd_noquotes" | sed -E 's/(^|[[:space:]])#.*$//')
 if echo "$_cmd_noquotes" | grep -qE '`|\$\(|<\(|>\(' ; then
   HAS_SUBSHELL=true
@@ -589,11 +678,13 @@ if [ "$IS_COMPOUND" = true ] && [ "$HAS_SUBSHELL" = false ]; then
   # treated as shell operators.
   ALL_SAFE=true
   # Replace single-quoted and double-quoted content with placeholders before splitting
-  # Use sed -z to handle multi-line quoted strings (e.g. mongosh --eval '...')
+  # Use perl -0777 (slurp mode) so multi-line quoted strings (e.g. mongosh --eval '...')
+  # are neutralized as one unit. Not sed -z: BSD sed (macOS) has no -z.
   # Pre-pass: protect backslash-escaped quotes (\' inside $'...', \" inside "...")
   # so they don't mis-pair the regex below.  Collapse \\ first so `\\'` (literal
   # backslash + real quote-opener) is not mistaken for an escaped quote.
-  _neutralized=$(printf '%s' "$CMD" | sed -E 's/\\\\/__BS__/g' | sed -E 's/\\['"'"'"]/__ESCQ__/g' | sed -z -E "s/'[^']*'/__Q__/g" | sed -z -E 's/"[^"]*"/__Q__/g')
+  _neutralized=$(printf '%s' "$CMD" | sed -E 's/\\\\/__BS__/g' | sed -E 's/\\['"'"'"]/__ESCQ__/g' | perl -0777 -pe "s/'[^']*'/__Q__/g" | perl -0777 -pe 's/"[^"]*"/__Q__/g')
+  [ -n "$_neutralized" ] || bail_unsure "segment-walk quote neutralizer"
   # Strip shell redirections before splitting so that 2>&1 etc. don't
   # cause false splits on the & operator.  The target character class
   # excludes shell separators (; | & < > ( )) so e.g. `2>/dev/null;` keeps
@@ -621,6 +712,14 @@ if [ "$IS_COMPOUND" = true ] && [ "$HAS_SUBSHELL" = false ]; then
     dbg "  seg $_seg_n safe"
   done < <(echo "$_neutralized" | sed 's/&&/\n/g' | sed 's/||/\n/g' | sed 's/&/\n/g' | sed 's/|/\n/g' | sed 's/;/\n/g')
 
+  # A compound command always has at least one real segment.  Zero means the
+  # split went wrong somewhere upstream, so do not treat "nothing unsafe
+  # found" as "safe".
+  if [ "$_seg_n" -eq 0 ]; then
+    dbg "  no segments found -> not auto-approving"
+    ALL_SAFE=false
+  fi
+
   if [ "$ALL_SAFE" = true ]; then
     dbg "decision: ALLOW (all segments safe)"
     echo "$ALLOW"
@@ -629,66 +728,7 @@ if [ "$IS_COMPOUND" = true ] && [ "$HAS_SUBSHELL" = false ]; then
 fi
 
 if [ "$IS_COMPOUND" = true ] && [ "$HAS_SUBSHELL" = true ]; then
-  dbg "compound + subshell: never auto-approved via segment walk; trying cloud/pipeline rules"
-fi
-
-# --- AWS ---
-# Strip leading env-var assignments (AWS_PROFILE=foo aws ...), then all
-# --flag and --flag=value tokens, then check the remaining positional
-# tokens for: aws <service> <read-only-verb>
-CMD_NOENV="$CMD"
-while [[ "$CMD_NOENV" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do
-  _next=$(echo "$CMD_NOENV" | sed -E 's/^[A-Za-z_][A-Za-z0-9_]*=[^ ]*[ ]+//')
-  [ "$_next" = "$CMD_NOENV" ] && break
-  CMD_NOENV="$_next"
-done
-AWS_STRIPPED=$(echo "$CMD_NOENV" | sed -E 's/--[a-zA-Z0-9_-]+([ =][^ ]*)?//g' | tr -s ' ')
-
-if echo "$AWS_STRIPPED" | grep -qE '^aws [a-z0-9-]+ (describe|list|get|head)-'; then
-  dbg "decision: ALLOW (AWS read-only verb describe|list|get|head-)"
-  echo "$ALLOW"
-  exit 0
-fi
-
-if echo "$AWS_STRIPPED" | grep -qE '^aws s3 ls'; then
-  dbg "decision: ALLOW (aws s3 ls)"
-  echo "$ALLOW"
-  exit 0
-fi
-
-if echo "$AWS_STRIPPED" | grep -qE '^aws sts get-caller-identity'; then
-  dbg "decision: ALLOW (aws sts get-caller-identity)"
-  echo "$ALLOW"
-  exit 0
-fi
-
-# --- GCP gcloud ---
-GCLOUD_STRIPPED=$(echo "$CMD_NOENV" | sed -E 's/--[a-zA-Z0-9_-]+([ =][^ ]*)?//g' | tr -s ' ')
-
-if echo "$GCLOUD_STRIPPED" | grep -qE '^gcloud .+ (describe|list|get|get-iam-policy)( |$)'; then
-  dbg "decision: ALLOW (gcloud read-only verb describe|list|get|get-iam-policy)"
-  echo "$ALLOW"
-  exit 0
-fi
-
-if echo "$GCLOUD_STRIPPED" | grep -qE '^gcloud (config list|config get|info|auth list|projects list|projects describe)'; then
-  dbg "decision: ALLOW (gcloud config/info/auth/projects read-only)"
-  echo "$ALLOW"
-  exit 0
-fi
-
-# --- GCP gsutil / gcloud storage ---
-if echo "$GCLOUD_STRIPPED" | grep -qE '^(gsutil|gcloud storage) (ls|cat|stat)'; then
-  dbg "decision: ALLOW (gsutil/gcloud storage ls|cat|stat)"
-  echo "$ALLOW"
-  exit 0
-fi
-
-# --- GCP bq ---
-if echo "$GCLOUD_STRIPPED" | grep -qE '^bq (show|ls)'; then
-  dbg "decision: ALLOW (bq show|ls)"
-  echo "$ALLOW"
-  exit 0
+  dbg "compound + subshell: never auto-approved via segment walk; trying pipeline rules"
 fi
 
 # --- FortiGate read-only SSH session (sshpass heredoc) ---
@@ -706,7 +746,8 @@ if echo "$_first" | grep -qE '^[[:space:]]*sshpass[[:space:]]' && \
   _fg_safe=true
 
   # First line: every pipe segment after the sshpass one must pass is_safe_cmd.
-  _first_neutralized=$(printf '%s' "$_first" | sed -z -E "s/'[^']*'/__Q__/g" | sed -z -E 's/"[^"]*"/__Q__/g')
+  _first_neutralized=$(printf '%s' "$_first" | perl -0777 -pe "s/'[^']*'/__Q__/g" | perl -0777 -pe 's/"[^"]*"/__Q__/g')
+  [ -n "$_first_neutralized" ] || _fg_safe=false
   _seg_idx=0
   while IFS= read -r _seg; do
     _seg_idx=$((_seg_idx+1))

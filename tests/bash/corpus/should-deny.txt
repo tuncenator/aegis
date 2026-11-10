@@ -237,6 +237,22 @@ rm -rf /etc
 rm -rf /var
 rm -rf /usr/bin
 
+# Cloud read-only rules used to match only the start of the command line,
+# so anything chained after them was allowed.
+aws s3 ls && git push --force origin main
+aws s3 ls; docker run --rm alpine date
+gcloud projects list && rm -rf /tmp
+bq ls | sh
+aws s3 ls $(rm -rf /tmp)
+gsutil ls gs://b || gsutil rm gs://b/f
+# gcloud rule matched a read word anywhere; aws get-* rule matched
+# file-writing verbs.  Flags like --quiet used to hide the next word.
+gcloud compute instances delete foo list
+gcloud compute instances --quiet delete foo list
+gcloud compute instances add-iam-policy-binding list
+aws s3api get-object --bucket b --key k /Users/x/.zshrc
+aws s3api get-object --bucket b --key k --no-cli-pager /Users/x/.zshrc
+
 # curl|sh and AI-attribution patterns moved to should-ask.txt -- they ASK
 # now (overridable) rather than hard-deny. Only truly nuclear patterns
 # remain in this file.
