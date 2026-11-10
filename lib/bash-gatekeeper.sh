@@ -173,6 +173,45 @@ strip_wrapper_args() {
 }
 
 # ---------------------------------------------------------------------------
+# is_safe_cloud_cmd -- read-only AWS / GCP commands.  Called from is_safe_cmd
+# on ONE command (env vars already stripped), never on a whole command line:
+# the rules only look at the start of the string, so `aws s3 ls && <anything>`
+# would otherwise pass.  As part of is_safe_cmd, a chain is allowed only when
+# every other segment passes too.
+# ---------------------------------------------------------------------------
+is_safe_cloud_cmd() {
+  local cmd="$1" stripped
+  case "$cmd" in aws\ *|gcloud\ *|gsutil\ *|bq\ *) ;; *) return 1 ;; esac
+  # Drop --flag and --flag=value tokens so only positional words remain.
+  stripped=$(echo "$cmd" | sed -E 's/--[a-zA-Z0-9_-]+([ =][^ ]*)?//g' | tr -s ' ')
+
+  # AWS: aws <service> <read-only-verb>
+  if echo "$stripped" | grep -qE '^aws [a-z0-9-]+ (describe|list|get|head)-'; then
+    dbg "is_safe_cloud_cmd: AWS read-only verb describe|list|get|head-"; return 0
+  fi
+  if echo "$stripped" | grep -qE '^aws (s3 ls|sts get-caller-identity)( |$)'; then
+    dbg "is_safe_cloud_cmd: aws s3 ls / sts get-caller-identity"; return 0
+  fi
+
+  # GCP gcloud
+  if echo "$stripped" | grep -qE '^gcloud .+ (describe|list|get|get-iam-policy)( |$)'; then
+    dbg "is_safe_cloud_cmd: gcloud read-only verb describe|list|get|get-iam-policy"; return 0
+  fi
+  if echo "$stripped" | grep -qE '^gcloud (config list|config get|info|auth list|projects list|projects describe)'; then
+    dbg "is_safe_cloud_cmd: gcloud config/info/auth/projects read-only"; return 0
+  fi
+
+  # GCP gsutil / gcloud storage / bq
+  if echo "$stripped" | grep -qE '^(gsutil|gcloud storage) (ls|cat|stat)'; then
+    dbg "is_safe_cloud_cmd: gsutil/gcloud storage ls|cat|stat"; return 0
+  fi
+  if echo "$stripped" | grep -qE '^bq (show|ls)'; then
+    dbg "is_safe_cloud_cmd: bq show|ls"; return 0
+  fi
+  return 1
+}
+
+# ---------------------------------------------------------------------------
 # is_safe_cmd -- returns 0 if a single (non-compound) command is safe to
 # auto-approve, 1 otherwise.  Handles base-command lookups, subcommand
 # checks for gh/docker/kubectl/acli, git patterns, and venv activation.
@@ -488,6 +527,10 @@ is_safe_cmd() {
     return 0
   fi
 
+  if is_safe_cloud_cmd "$cmd"; then
+    return 0
+  fi
+
   dbg "is_safe_cmd: no rule matched -> reject"
   return 1
 }
@@ -652,66 +695,7 @@ if [ "$IS_COMPOUND" = true ] && [ "$HAS_SUBSHELL" = false ]; then
 fi
 
 if [ "$IS_COMPOUND" = true ] && [ "$HAS_SUBSHELL" = true ]; then
-  dbg "compound + subshell: never auto-approved via segment walk; trying cloud/pipeline rules"
-fi
-
-# --- AWS ---
-# Strip leading env-var assignments (AWS_PROFILE=foo aws ...), then all
-# --flag and --flag=value tokens, then check the remaining positional
-# tokens for: aws <service> <read-only-verb>
-CMD_NOENV="$CMD"
-while [[ "$CMD_NOENV" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do
-  _next=$(echo "$CMD_NOENV" | sed -E 's/^[A-Za-z_][A-Za-z0-9_]*=[^ ]*[ ]+//')
-  [ "$_next" = "$CMD_NOENV" ] && break
-  CMD_NOENV="$_next"
-done
-AWS_STRIPPED=$(echo "$CMD_NOENV" | sed -E 's/--[a-zA-Z0-9_-]+([ =][^ ]*)?//g' | tr -s ' ')
-
-if echo "$AWS_STRIPPED" | grep -qE '^aws [a-z0-9-]+ (describe|list|get|head)-'; then
-  dbg "decision: ALLOW (AWS read-only verb describe|list|get|head-)"
-  echo "$ALLOW"
-  exit 0
-fi
-
-if echo "$AWS_STRIPPED" | grep -qE '^aws s3 ls'; then
-  dbg "decision: ALLOW (aws s3 ls)"
-  echo "$ALLOW"
-  exit 0
-fi
-
-if echo "$AWS_STRIPPED" | grep -qE '^aws sts get-caller-identity'; then
-  dbg "decision: ALLOW (aws sts get-caller-identity)"
-  echo "$ALLOW"
-  exit 0
-fi
-
-# --- GCP gcloud ---
-GCLOUD_STRIPPED=$(echo "$CMD_NOENV" | sed -E 's/--[a-zA-Z0-9_-]+([ =][^ ]*)?//g' | tr -s ' ')
-
-if echo "$GCLOUD_STRIPPED" | grep -qE '^gcloud .+ (describe|list|get|get-iam-policy)( |$)'; then
-  dbg "decision: ALLOW (gcloud read-only verb describe|list|get|get-iam-policy)"
-  echo "$ALLOW"
-  exit 0
-fi
-
-if echo "$GCLOUD_STRIPPED" | grep -qE '^gcloud (config list|config get|info|auth list|projects list|projects describe)'; then
-  dbg "decision: ALLOW (gcloud config/info/auth/projects read-only)"
-  echo "$ALLOW"
-  exit 0
-fi
-
-# --- GCP gsutil / gcloud storage ---
-if echo "$GCLOUD_STRIPPED" | grep -qE '^(gsutil|gcloud storage) (ls|cat|stat)'; then
-  dbg "decision: ALLOW (gsutil/gcloud storage ls|cat|stat)"
-  echo "$ALLOW"
-  exit 0
-fi
-
-# --- GCP bq ---
-if echo "$GCLOUD_STRIPPED" | grep -qE '^bq (show|ls)'; then
-  dbg "decision: ALLOW (bq show|ls)"
-  echo "$ALLOW"
-  exit 0
+  dbg "compound + subshell: never auto-approved via segment walk; trying pipeline rules"
 fi
 
 # --- FortiGate read-only SSH session (sshpass heredoc) ---
