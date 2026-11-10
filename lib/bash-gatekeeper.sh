@@ -34,6 +34,17 @@ if [ -z "$CMD" ]; then
 fi
 dbg "input: $CMD"
 
+# Fail closed when a text-rewriting step breaks.  The quote neutralizer and
+# continuation join below never turn a non-empty command into an empty one,
+# so empty output means the tool failed (missing perl, a GNU-only sed flag
+# on macOS, ...).  Carrying on with an empty string would leave the segment
+# walker nothing to reject and hard-allow the command.  Exit silently so the
+# normal permission flow decides instead.
+bail_unsure() {
+  dbg "decision: silent fall-through ($1 produced no output -- not trusting the analysis)"
+  exit 0
+}
+
 # ---------------------------------------------------------------------------
 # is_db_write -- returns 0 if the database command contains write operations,
 # 1 otherwise (appears read-only).  Checked against the full command string.
@@ -508,6 +519,7 @@ fi
 # as a standalone command that no rule matches.
 if [[ "$CMD" == *$'\\\n'* ]]; then
   CMD=$(printf '%s' "$CMD" | perl -0777 -pe 's/\\\n[[:space:]]*/ /g')
+  [ -n "$CMD" ] || bail_unsure "continuation join"
   dbg "normalized backslash-newline continuations: $CMD"
 fi
 
@@ -529,6 +541,7 @@ HAS_SUBSHELL=false
 # by a real quote-opener like `\\'` doesn't look like an escaped quote),
 # then replace \' (from $'...') and \" (from "...") with a placeholder.
 _cmd_noquotes=$(printf '%s' "$CMD" | sed -E 's/\\\\/__BS__/g' | sed -E 's/\\['"'"'"]/__ESCQ__/g' | perl -0777 -pe "s/'[^']*'/__Q__/g" | perl -0777 -pe 's/"[^"]*"/__Q__/g')
+[ -n "$_cmd_noquotes" ] || bail_unsure "subshell-check quote neutralizer"
 _cmd_noquotes=$(printf '%s' "$_cmd_noquotes" | sed -E 's/(^|[[:space:]])#.*$//')
 if echo "$_cmd_noquotes" | grep -qE '`|\$\(|<\(|>\(' ; then
   HAS_SUBSHELL=true
@@ -595,6 +608,7 @@ if [ "$IS_COMPOUND" = true ] && [ "$HAS_SUBSHELL" = false ]; then
   # so they don't mis-pair the regex below.  Collapse \\ first so `\\'` (literal
   # backslash + real quote-opener) is not mistaken for an escaped quote.
   _neutralized=$(printf '%s' "$CMD" | sed -E 's/\\\\/__BS__/g' | sed -E 's/\\['"'"'"]/__ESCQ__/g' | perl -0777 -pe "s/'[^']*'/__Q__/g" | perl -0777 -pe 's/"[^"]*"/__Q__/g')
+  [ -n "$_neutralized" ] || bail_unsure "segment-walk quote neutralizer"
   # Strip shell redirections before splitting so that 2>&1 etc. don't
   # cause false splits on the & operator.  The target character class
   # excludes shell separators (; | & < > ( )) so e.g. `2>/dev/null;` keeps
@@ -621,6 +635,14 @@ if [ "$IS_COMPOUND" = true ] && [ "$HAS_SUBSHELL" = false ]; then
     fi
     dbg "  seg $_seg_n safe"
   done < <(echo "$_neutralized" | sed 's/&&/\n/g' | sed 's/||/\n/g' | sed 's/&/\n/g' | sed 's/|/\n/g' | sed 's/;/\n/g')
+
+  # A compound command always has at least one real segment.  Zero means the
+  # split went wrong somewhere upstream, so do not treat "nothing unsafe
+  # found" as "safe".
+  if [ "$_seg_n" -eq 0 ]; then
+    dbg "  no segments found -> not auto-approving"
+    ALL_SAFE=false
+  fi
 
   if [ "$ALL_SAFE" = true ]; then
     dbg "decision: ALLOW (all segments safe)"
@@ -708,6 +730,7 @@ if echo "$_first" | grep -qE '^[[:space:]]*sshpass[[:space:]]' && \
 
   # First line: every pipe segment after the sshpass one must pass is_safe_cmd.
   _first_neutralized=$(printf '%s' "$_first" | perl -0777 -pe "s/'[^']*'/__Q__/g" | perl -0777 -pe 's/"[^"]*"/__Q__/g')
+  [ -n "$_first_neutralized" ] || _fg_safe=false
   _seg_idx=0
   while IFS= read -r _seg; do
     _seg_idx=$((_seg_idx+1))
