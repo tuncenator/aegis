@@ -185,17 +185,50 @@ is_safe_cloud_cmd() {
   # Drop --flag and --flag=value tokens so only positional words remain.
   stripped=$(echo "$cmd" | sed -E 's/--[a-zA-Z0-9_-]+([ =][^ ]*)?//g' | tr -s ' ')
 
-  # AWS: aws <service> <read-only-verb>
-  if echo "$stripped" | grep -qE '^aws [a-z0-9-]+ (describe|list|get|head)-'; then
+  # Words that change state, on their own or as a hyphenated prefix
+  # (delete, delete-instances, add-iam-policy-binding, ...).  Checked against
+  # every non-flag word of the RAW command, not just $stripped: the flag
+  # stripper also eats the word after a boolean flag (`--quiet delete`), so
+  # a write verb could hide from $stripped.  A false hit only means a prompt.
+  local write_re='^(create|recreate|delete|update|set|unset|add|remove|deploy|ssh|scp|start|stop|reset|restart|reboot|resize|resume|suspend|import|export|move|patch|replace|enable|disable|cancel|abandon|run|submit|execute|exec|attach|detach|restore|rollback|undelete|deprecate|activate|login|revoke|purge|send|publish|apply|clear|copy|cp|rm|mv|rsync|upload|download|migrate|promote|failover|switchover|simulate|rotate|sign|encrypt|decrypt|connect|tag|untag)(-[a-z0-9-]*)?$'
+  local _w _raw_words
+  read -ra _raw_words <<< "$cmd"
+
+  # AWS: aws <service> <read-only-verb>, nothing else positional.  A
+  # positional word after the verb is an output file (s3api get-object
+  # <outfile>), so anchor the end.  The flag stripper can eat that file
+  # after a boolean flag, so also refuse the known file-writing get-* verbs.
+  for _w in "${_raw_words[@]}"; do
+    case "$_w" in
+      get-object|get-object-torrent|get-job-output|get-media|get-clip|get-snapshot-block)
+        dbg "is_safe_cloud_cmd: AWS $_w writes a local file -> reject"; return 1 ;;
+    esac
+  done
+  if echo "$stripped" | grep -qE '^aws [a-z0-9-]+ (describe|list|get|head)-[a-z0-9-]+ ?$'; then
     dbg "is_safe_cloud_cmd: AWS read-only verb describe|list|get|head-"; return 0
   fi
   if echo "$stripped" | grep -qE '^aws (s3 ls|sts get-caller-identity)( |$)'; then
     dbg "is_safe_cloud_cmd: aws s3 ls / sts get-caller-identity"; return 0
   fi
 
-  # GCP gcloud
-  if echo "$stripped" | grep -qE '^gcloud .+ (describe|list|get|get-iam-policy)( |$)'; then
-    dbg "is_safe_cloud_cmd: gcloud read-only verb describe|list|get|get-iam-policy"; return 0
+  # GCP gcloud: gcloud <1 to 3 group words> <read verb> [args].  The group
+  # words come before the command word, so a write word there means the
+  # command is a write (`gcloud compute instances delete foo list`).
+  if [ "${_raw_words[0]}" = gcloud ]; then
+    for _w in "${_raw_words[@]:1}"; do
+      case "$_w" in -*) continue ;; esac
+      if [[ "$_w" =~ $write_re ]]; then
+        dbg "is_safe_cloud_cmd: gcloud write word '$_w' -> reject"; return 1
+      fi
+    done
+    local _gw _i
+    read -ra _gw <<< "$stripped"
+    for ((_i = 1; _i < ${#_gw[@]}; _i++)); do
+      case "${_gw[$_i]}" in describe|list|get|get-iam-policy) break ;; esac
+    done
+    if [ "$_i" -ge 2 ] && [ "$_i" -le 4 ] && [ "$_i" -lt "${#_gw[@]}" ]; then
+      dbg "is_safe_cloud_cmd: gcloud read-only verb ${_gw[$_i]} after $((_i - 1)) group word(s)"; return 0
+    fi
   fi
   if echo "$stripped" | grep -qE '^gcloud (config list|config get|info|auth list|projects list|projects describe)'; then
     dbg "is_safe_cloud_cmd: gcloud config/info/auth/projects read-only"; return 0
